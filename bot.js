@@ -2,182 +2,210 @@ const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle 
 const fs = require('fs');
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMessageReactions
-  ]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
+// ===== DATA =====
 let cards = [];
-let pendingDelete = {};
-let sessions = {};
+let history = [];
+let quizActive = false;
+let score = 0;
+let total = 0;
+let maxQuestions = null;
 
-// load cards
-if (fs.existsSync('cards.json')) {
-  cards = JSON.parse(fs.readFileSync('cards.json'));
+// load saved data
+if (fs.existsSync('data.json')) {
+  const data = JSON.parse(fs.readFileSync('data.json'));
+  cards = data.cards || [];
+  history = data.history || [];
 }
 
-client.on('ready', () => {
+function saveData() {
+  fs.writeFileSync('data.json', JSON.stringify({ cards, history }, null, 2));
+}
+
+// ===== READY =====
+client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
+// ===== MESSAGE HANDLER =====
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
+  if (!message.content.startsWith('?')) return;
 
-  // ADD
-  if (message.content.startsWith('?add')) {
-    let input = message.content.replace('?add ', '').split('|');
-    if (input.length < 2) return message.reply('Use: ?add Korean | romanization');
+  const args = message.content.slice(1).trim().split(' ');
+  const command = args[0];
 
-    let korean = input[0].trim();
-    let romanization = input[1].trim();
+  // ===== ADD =====
+  if (command === 'add') {
+    const text = args.slice(1).join(' ');
+    const parts = text.split('|');
 
-    cards.push({ korean, romanization });
-    fs.writeFileSync('cards.json', JSON.stringify(cards, null, 2));
+    if (parts.length < 2) {
+      return message.reply('Use: ?add korean | romanization');
+    }
 
-    return message.reply(`Saved: ${korean} (${romanization})`);
+    const korean = parts[0].trim();
+    const roman = parts[1].trim();
+
+    cards.push({ korean, roman });
+    saveData();
+
+    return message.reply(`Saved: ${korean} (${roman})`);
   }
 
-  // VIEW
-  if (message.content === '?cards') {
-    if (cards.length === 0) return message.reply('No cards saved.');
+  // ===== CARDS =====
+  if (command === 'cards') {
+    if (cards.length === 0) return message.reply('No cards.');
 
-    let list = cards.map((c, i) => `${i + 1}. ${c.korean} (${c.romanization})`).join('\n');
-    return message.reply(`Your cards:\n${list}`);
+    let list = cards.map((c, i) => `${i + 1}. ${c.korean} (${c.roman})`).join('\n');
+    let hist = history.slice(-10).map((h, i) => `${i + 1}. ${h.score}/${h.total}`).join('\n');
+
+    return message.reply(`Cards:\n${list}\n\nHistory:\n${hist || 'None'}`);
   }
 
-  // DELETE
-  if (message.content.startsWith('?deletecard')) {
-    let num = parseInt(message.content.split(' ')[1]);
-    if (!num || num < 1 || num > cards.length) return message.reply('Invalid number.');
+  // ===== QUIZ =====
+  if (command === 'quiz') {
+    if (cards.length === 0) return message.reply('No cards.');
 
-    pendingDelete[message.author.id] = num - 1;
+    quizActive = true;
+    score = 0;
+    total = 0;
+    maxQuestions = args[1] ? parseInt(args[1]) : null;
+
+    sendQuestion(message);
+  }
+
+  // ===== STOP =====
+  if (command === 'stop') {
+    if (!quizActive) return message.reply('No quiz running.');
+
+    quizActive = false;
+    history.push({ score, total });
+    if (history.length > 10) history.shift();
+    saveData();
+
+    return message.reply(`Finished: ${score}/${total}`);
+  }
+
+  // ===== DELETE CARD =====
+  if (command === 'deletecard') {
+    const index = parseInt(args[1]) - 1;
+    if (isNaN(index) || !cards[index]) return message.reply('Invalid number.');
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('confirm_delete').setLabel('Yes').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('cancel_delete').setLabel('No').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(`del_yes_${index}`).setLabel('Yes').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('del_no').setLabel('No').setStyle(ButtonStyle.Secondary)
     );
 
-    return message.reply({ content: `Delete card ${num}?`, components: [row] });
+    return message.reply({ content: `Delete card ${index + 1}?`, components: [row] });
   }
 
-  // START QUIZ
-  if (message.content.startsWith('?quiz')) {
-    if (cards.length < 4) return message.reply('Need at least 4 cards.');
+  // ===== RESET =====
+  if (command === 'resetcards') {
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('reset_yes').setLabel('Yes').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('reset_no').setLabel('No').setStyle(ButtonStyle.Secondary)
+    );
 
-    let parts = message.content.split(' ');
-    let max = parts[1] ? parseInt(parts[1]) : null;
-
-    sessions[message.author.id] = {
-      correct: 0,
-      total: 0,
-      max: max
-    };
-
-    return sendQuestion(message);
-  }
-
-  // STOP
-  if (message.content === '?stop') {
-    let s = sessions[message.author.id];
-    if (!s) return message.reply('No quiz running.');
-
-    delete sessions[message.author.id];
-
-    return message.reply(`Final Score: ${s.correct}/${s.total}`);
+    return message.reply({ content: 'Reset ALL cards?', components: [row] });
   }
 });
 
-// QUESTION FUNCTION
-async function sendQuestion(message) {
-  let s = sessions[message.author.id];
-  if (!s) return;
+// ===== BUTTON HANDLER =====
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isButton()) return;
 
-  if (s.max && s.total >= s.max) {
-    delete sessions[message.author.id];
-    return message.channel.send(`Final Score: ${s.correct}/${s.total}`);
+  const id = interaction.customId;
+
+  if (id.startsWith('del_yes_')) {
+    const index = parseInt(id.split('_')[2]);
+    cards.splice(index, 1);
+    saveData();
+    return interaction.update({ content: 'Deleted.', components: [] });
   }
 
-  let correctCard = cards[Math.floor(Math.random() * cards.length)];
+  if (id === 'del_no') {
+    return interaction.update({ content: 'Cancelled.', components: [] });
+  }
 
-  let options = [correctCard];
-  while (options.length < 4) {
-    let rand = cards[Math.floor(Math.random() * cards.length)];
+  if (id === 'reset_yes') {
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('confirm_reset').setLabel('Confirm').setStyle(ButtonStyle.Danger)
+    );
+    return interaction.update({ content: 'Are you sure?', components: [row] });
+  }
+
+  if (id === 'confirm_reset') {
+    cards = [];
+    saveData();
+    return interaction.update({ content: 'All cards deleted.', components: [] });
+  }
+
+  if (id === 'reset_no') {
+    return interaction.update({ content: 'Cancelled.', components: [] });
+  }
+});
+
+// ===== QUIZ FUNCTION (REACTIONS) =====
+function sendQuestion(message) {
+  const correct = cards[Math.floor(Math.random() * cards.length)];
+
+  let options = [correct];
+  while (options.length < 4 && cards.length > options.length) {
+    const rand = cards[Math.floor(Math.random() * cards.length)];
     if (!options.includes(rand)) options.push(rand);
   }
 
   options = options.sort(() => Math.random() - 0.5);
 
-  let correctIndex = options.findIndex(o => o === correctCard);
+  const correctIndex = options.findIndex(o => o === correct);
 
-  s.answer = correctIndex;
+  let text = options.map((o, i) => `${i + 1}. ${o.roman}`).join('\n');
 
-  let text = `What is: ${correctCard.romanization}?\n\n`;
-  text += options.map((o, i) => `${i + 1}. ${o.korean}`).join('\n');
+  message.reply(`What is this: ${correct.korean}\n\n${text}`).then(msg => {
+    const emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
 
-  let msg = await message.channel.send(text);
+    emojis.slice(0, options.length).forEach(e => msg.react(e));
 
-  const emojis = ['1️⃣','2️⃣','3️⃣','4️⃣'];
-  for (let i = 0; i < 4; i++) {
-    await msg.react(emojis[i]);
-  }
+    const filter = (reaction, user) =>
+      emojis.includes(reaction.emoji.name) && user.id === message.author.id;
 
-  const filter = (reaction, user) => emojis.includes(reaction.emoji.name) && user.id === message.author.id;
+    const collector = msg.createReactionCollector({ filter, time: 15000, max: 1 });
 
-  const collector = msg.createReactionCollector({ filter, max: 1, time: 30000 });
+    collector.on('collect', (reaction) => {
+      const index = emojis.indexOf(reaction.emoji.name);
 
-  collector.on('collect', (reaction) => {
-    let choice = emojis.indexOf(reaction.emoji.name);
+      if (index === correctIndex) {
+        score++;
+        msg.reply('Correct');
+      } else {
+        msg.reply(`Wrong. Answer: ${correct.roman}`);
+      }
 
-    s.total++;
+      total++;
 
-    if (choice === s.answer) {
-      s.correct++;
-      message.channel.send(`Correct! ${s.correct}/${s.total}`);
-    } else {
-      message.channel.send(`Wrong! Answer was ${options[s.answer].korean} (${options[s.answer].romanization}) | ${s.correct}/${s.total}`);
-    }
+      if (maxQuestions && total >= maxQuestions) {
+        quizActive = false;
+        history.push({ score, total });
+        if (history.length > 10) history.shift();
+        saveData();
 
-    sendQuestion(message);
-  });
+        return msg.reply(`Finished: ${score}/${total}`);
+      }
 
-  collector.on('end', collected => {
-    if (collected.size === 0) {
-      message.channel.send('Timed out.');
-    }
+      sendQuestion(message);
+    });
+
+    collector.on('end', (collected) => {
+      if (collected.size === 0) {
+        msg.reply(`Time's up. Answer: ${correct.roman}`);
+        total++;
+        sendQuestion(message);
+      }
+    });
   });
 }
 
-// BUTTONS
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isButton()) return;
-
-  let index = pendingDelete[interaction.user.id];
-
-  if (interaction.customId === 'confirm_delete') {
-    if (index !== undefined) {
-      let removed = cards.splice(index, 1)[0];
-      fs.writeFileSync('cards.json', JSON.stringify(cards, null, 2));
-
-      delete pendingDelete[interaction.user.id];
-
-      return interaction.update({
-        content: `Deleted: ${removed.korean} (${removed.romanization})`,
-        components: []
-      });
-    }
-  }
-
-  if (interaction.customId === 'cancel_delete') {
-    delete pendingDelete[interaction.user.id];
-
-    return interaction.update({
-      content: 'Cancelled.',
-      components: []
-    });
-  }
-});
-
-client.login('PUT_YOUR_TOKEN_HERE');
+client.login(process.env.TOKEN);
