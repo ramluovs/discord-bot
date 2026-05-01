@@ -358,6 +358,7 @@ async function handleUserCommand(message, query) {
     : { friends: null, followers: null, followings: null };
   const headshotUrl = headshotResult.status === 'fulfilled' ? headshotResult.value : null;
   const rolimonsData = rolimonsResult.status === 'fulfilled' ? rolimonsResult.value : null;
+  console.log('ROLIMONS DATA:', JSON.stringify(rolimonsData, null, 2));
   const rolimonsPlayerInfo = await fetchRolimonsPlayerInfo(userId);
 
   let rap = null;
