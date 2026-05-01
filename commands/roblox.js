@@ -362,7 +362,6 @@ async function handleUserCommand(message, query) {
 
   let rap = null;
   let value = null;
-  let usingCachedRolimonsInfo = false;
 
   if (rolimonsData && !rolimonsData.playerPrivacyEnabled) {
     try {
@@ -381,28 +380,28 @@ async function handleUserCommand(message, query) {
   } else if (rolimonsPlayerInfo) {
     rap = typeof rolimonsPlayerInfo.rap === 'number' ? rolimonsPlayerInfo.rap : null;
     value = typeof rolimonsPlayerInfo.value === 'number' ? rolimonsPlayerInfo.value : null;
-    usingCachedRolimonsInfo = rap !== null || value !== null;
   }
+
+  const inventoryUrl = `https://www.roblox.com/users/${userId}/inventory/#!/hats`;
+  const rolimonsProfileUrl = `https://www.rolimons.com/player/${userId}`;
+  const friendsUrl = `https://www.roblox.com/users/${userId}/friends`;
+  const followersUrl = `https://www.roblox.com/users/${userId}/followers`;
+  const followingUrl = `https://www.roblox.com/users/${userId}/following`;
 
   const inventoryValue = rolimonsData
     ? rolimonsData.playerPrivacyEnabled
-      ? 'Privado (RAP guardado)'
+      ? 'Privado'
       : 'Público'
     : 'No disponible';
 
-  const rapValue =
-    typeof rap === 'number'
-      ? `${formatNumber(rap)}${usingCachedRolimonsInfo ? ' (último guardado)' : ''}${
-        rolimonsData?.chartNominalScanTime ? `\n<t:${rolimonsData.chartNominalScanTime}:d>` : ''
-      }`
-      : 'Sin datos';
+  const rapValue = `[${typeof rap === 'number' ? formatNumber(rap) : 'Sin datos'}](${rolimonsProfileUrl})${
+    rolimonsData?.chartNominalScanTime ? `\n<t:${rolimonsData.chartNominalScanTime}:d>` : ''
+  }`;
 
   const valueFieldValue =
-    typeof value === 'number'
-      ? `${formatNumber(value)}${usingCachedRolimonsInfo ? ' (último guardado)' : ''}${
-        rolimonsData?.chartNominalScanTime ? `\n<t:${rolimonsData.chartNominalScanTime}:d>` : ''
-      }`
-      : 'Sin datos';
+    `[${typeof value === 'number' ? formatNumber(value) : 'Sin datos'}](${rolimonsProfileUrl})${
+      rolimonsData?.chartNominalScanTime ? `\n<t:${rolimonsData.chartNominalScanTime}:d>` : ''
+    }`;
 
   const embed = new EmbedBuilder()
     .setColor(PASTEL_BLUE)
@@ -422,7 +421,7 @@ async function handleUserCommand(message, query) {
     },
     {
       name: 'Inventario',
-      value: inventoryValue,
+      value: `[${inventoryValue}](${inventoryUrl})`,
       inline: true
     },
     {
@@ -474,17 +473,17 @@ async function handleUserCommand(message, query) {
   embed.addFields(
     {
       name: 'Amigos',
-      value: counts.friends !== null ? formatNumber(counts.friends) : '0',
+      value: `[${counts.friends !== null ? formatNumber(counts.friends) : '0'}](${friendsUrl})`,
       inline: true
     },
     {
       name: 'Seguidores',
-      value: counts.followers !== null ? formatNumber(counts.followers) : '0',
+      value: `[${counts.followers !== null ? formatNumber(counts.followers) : '0'}](${followersUrl})`,
       inline: true
     },
     {
       name: 'Siguiendo',
-      value: counts.followings !== null ? formatNumber(counts.followings) : '0',
+      value: `[${counts.followings !== null ? formatNumber(counts.followings) : '0'}](${followingUrl})`,
       inline: true
     }
   );
