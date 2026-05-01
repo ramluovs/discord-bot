@@ -76,6 +76,13 @@ function pickRandomEmojiMention(context, names) {
   return getEmojiMention(context, name);
 }
 
+function createBlueEmbed(title, description) {
+  return new EmbedBuilder()
+    .setColor(PASTEL_BLUE)
+    .setTitle(title)
+    .setDescription(description);
+}
+
 function createQuestionEmbed(message, correct, options) {
   const time = Math.floor(Date.now() / 1000) + QUIZ_TIMEOUT_SECONDS;
   const isFirstQuestion = total === 0;
@@ -103,14 +110,14 @@ function createAnswerEmbed(message, isCorrect, correctAnswer) {
   const titleEmoji = pickRandomEmojiMention(message, isCorrect ? RIGHT_EMOJI_NAMES : WRONG_EMOJI_NAMES);
 
   return new EmbedBuilder()
-    .setColor(isCorrect ? PASTEL_GREEN : PASTEL_PINK)
+    .setColor(PASTEL_BLUE)
     .setTitle(`${titleEmoji} ${isCorrect ? 'Correct ✧' : 'Wrong ♡'}`)
     .setDescription([`Answer: **${correctAnswer}**`, `Score: ${score}/${total}`].join('\n'));
 }
 
 function createTimeoutEmbed(message, correctAnswer) {
   return new EmbedBuilder()
-    .setColor(PASTEL_PINK)
+    .setColor(PASTEL_BLUE)
     .setTitle(`${pickRandomEmojiMention(message, WRONG_EMOJI_NAMES)} Time's up ♡`)
     .setDescription([`Answer: **${correctAnswer}**`, `Score: ${score}/${total}`].join('\n'));
 }
@@ -122,6 +129,39 @@ function createFinalScoreEmbed() {
     .setColor(PASTEL_BLUE)
     .setTitle('⋆｡°✩ quiz finished ✩°｡⋆')
     .setDescription([`Final Score: ${score}/${total}`, `Percentage: ${percentage}%`].join('\n'));
+}
+
+function createCardsEmbed() {
+  const list = cards.map((card, index) => `${index + 1}. ${card.korean} (${card.roman})`).join('\n');
+  const hist = history.slice(-10).map((entry, index) => `${index + 1}. ${entry.score}/${entry.total}`).join('\n');
+
+  return createBlueEmbed(
+    '✧ ˚ ༘ ⋆｡° card collection °｡⋆ ༘ ˚ ✧',
+    [
+      '✦ cards ✦',
+      '',
+      list,
+      '',
+      '✦ recent history ✦',
+      '',
+      hist || 'None'
+    ].join('\n')
+  );
+}
+
+function createEmptyCardsEmbed(reason) {
+  return createBlueEmbed(
+    '☁️ ✦ no cards yet ✦',
+    [
+      reason,
+      '',
+      'Add one with `?add korean | romanization`.'
+    ].join('\n')
+  );
+}
+
+function createActionEmbed(title, lines) {
+  return createBlueEmbed(title, lines.join('\n'));
 }
 
 // ===== READY =====
@@ -143,7 +183,11 @@ client.on('messageCreate', async message => {
     const parts = text.split('|');
 
     if (parts.length < 2) {
-      return message.reply('Use: ?add korean | romanization');
+      return message.reply({
+        embeds: [
+          createActionEmbed('✦ add format ✦', ['Use:', '', '`?add korean | romanization`'])
+        ]
+      });
     }
 
     const korean = parts[0].trim();
@@ -152,22 +196,34 @@ client.on('messageCreate', async message => {
     cards.push({ korean, roman });
     saveData();
 
-    return message.reply(`Saved: ${korean} (${roman})`);
+    return message.reply({
+      embeds: [
+        createActionEmbed('✧ card saved ✧', [
+          `Korean: **${korean}**`,
+          `Romanization: **${roman}**`
+        ])
+      ]
+    });
   }
 
   // ===== CARDS =====
   if (command === 'cards') {
-    if (cards.length === 0) return message.reply('No cards.');
+    if (cards.length === 0) {
+      return message.reply({
+        embeds: [createEmptyCardsEmbed('Your study deck is empty right now.')]
+      });
+    }
 
-    const list = cards.map((c, i) => `${i + 1}. ${c.korean} (${c.roman})`).join('\n');
-    const hist = history.slice(-10).map((h, i) => `${i + 1}. ${h.score}/${h.total}`).join('\n');
-
-    return message.reply(`Cards:\n${list}\n\nHistory:\n${hist || 'None'}`);
+    return message.reply({ embeds: [createCardsEmbed()] });
   }
 
   // ===== QUIZ =====
   if (command === 'quiz') {
-    if (cards.length === 0) return message.reply('No cards.');
+    if (cards.length === 0) {
+      return message.reply({
+        embeds: [createEmptyCardsEmbed('You need at least one card before starting a quiz.')]
+      });
+    }
 
     quizActive = true;
     score = 0;
@@ -184,7 +240,13 @@ client.on('messageCreate', async message => {
 
   // ===== STOP =====
   if (command === 'stop') {
-    if (!quizActive) return message.reply('No quiz running.');
+    if (!quizActive) {
+      return message.reply({
+        embeds: [
+          createActionEmbed('✦ no active quiz ✦', ['There is not a quiz running right now.'])
+        ]
+      });
+    }
 
     quizActive = false;
 
@@ -203,14 +265,31 @@ client.on('messageCreate', async message => {
   // ===== DELETE CARD =====
   if (command === 'deletecard') {
     const index = parseInt(args[1]) - 1;
-    if (isNaN(index) || !cards[index]) return message.reply('Invalid number.');
+    if (isNaN(index) || !cards[index]) {
+      return message.reply({
+        embeds: [
+          createActionEmbed('✦ invalid card number ✦', [
+            'Pick a valid card number from your saved list.'
+          ])
+        ]
+      });
+    }
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`del_yes_${index}`).setLabel('Yes').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('del_no').setLabel('No').setStyle(ButtonStyle.Secondary)
     );
 
-    return message.reply({ content: `Delete card ${index + 1}?`, components: [row] });
+    return message.reply({
+      embeds: [
+        createActionEmbed('♡ delete this card? ♡', [
+          `Card ${index + 1}: **${cards[index].korean}** (${cards[index].roman})`,
+          '',
+          'This action cannot be undone.'
+        ])
+      ],
+      components: [row]
+    });
   }
 
   // ===== RESET =====
@@ -220,7 +299,16 @@ client.on('messageCreate', async message => {
       new ButtonBuilder().setCustomId('reset_no').setLabel('No').setStyle(ButtonStyle.Secondary)
     );
 
-    return message.reply({ content: 'Reset ALL cards?', components: [row] });
+    return message.reply({
+      embeds: [
+        createActionEmbed('✧ reset all cards? ✧', [
+          'This will remove your entire saved deck.',
+          '',
+          'Press a button below to choose.'
+        ])
+      ],
+      components: [row]
+    });
   }
 });
 
@@ -234,28 +322,49 @@ client.on('interactionCreate', async interaction => {
     const index = parseInt(id.split('_')[2]);
     cards.splice(index, 1);
     saveData();
-    return interaction.update({ content: 'Deleted.', components: [] });
+    return interaction.update({
+      embeds: [createActionEmbed('✦ card deleted ✦', ['The selected card has been removed.'])],
+      components: []
+    });
   }
 
   if (id === 'del_no') {
-    return interaction.update({ content: 'Cancelled.', components: [] });
+    return interaction.update({
+      embeds: [createActionEmbed('☁️ action cancelled ✦', ['Nothing was changed.'])],
+      components: []
+    });
   }
 
   if (id === 'reset_yes') {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('confirm_reset').setLabel('Confirm').setStyle(ButtonStyle.Danger)
     );
-    return interaction.update({ content: 'Are you sure?', components: [row] });
+    return interaction.update({
+      embeds: [
+        createActionEmbed('⋆｡°✩ are you sure? ✩°｡⋆', [
+          'This will delete every saved card.',
+          '',
+          'Press `Confirm` if you want to continue.'
+        ])
+      ],
+      components: [row]
+    });
   }
 
   if (id === 'confirm_reset') {
     cards = [];
     saveData();
-    return interaction.update({ content: 'All cards deleted.', components: [] });
+    return interaction.update({
+      embeds: [createActionEmbed('♡ all cards deleted ♡', ['Your saved deck has been cleared.'])],
+      components: []
+    });
   }
 
   if (id === 'reset_no') {
-    return interaction.update({ content: 'Cancelled.', components: [] });
+    return interaction.update({
+      embeds: [createActionEmbed('☁️ action cancelled ✦', ['Nothing was changed.'])],
+      components: []
+    });
   }
 });
 
@@ -303,9 +412,15 @@ async function sendQuestion(message) {
     quizActive = false;
     activeCollector.stop('reaction_error');
     activeCollector = null;
-    return quizMessage.reply(
-      'I could not add the quiz reactions. Check that the emoji names exist in this server and that the bot has Add Reactions and Read Message History permissions.'
-    );
+    return quizMessage.reply({
+      embeds: [
+        createActionEmbed('✦ reactions unavailable ✦', [
+          'I could not add the quiz reactions.',
+          '',
+          'Check that the emoji names exist in this server and that the bot has `Add Reactions` and `Read Message History` permissions.'
+        ])
+      ]
+    });
   }
 
   collector.on('collect', async reaction => {
