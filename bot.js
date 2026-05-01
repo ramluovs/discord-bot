@@ -7,21 +7,23 @@ const {
   EmbedBuilder
 } = require('discord.js');
 const fs = require('fs');
-const OpenAI = require('openai');
+const ask = require('./commands/ask');
+const moderationCommands = {
+  ban: require('./commands/moderation/ban'),
+  unban: require('./commands/moderation/unban'),
+  kick: require('./commands/moderation/kick'),
+  timeout: require('./commands/moderation/timeout'),
+  clear: require('./commands/moderation/clear'),
+  setnick: require('./commands/moderation/setnick')
+};
 
 const QUIZ_TIMEOUT_SECONDS = 15;
-const AI_FOLLOW_UP_WINDOW_MS = 60 * 1000;
-const AI_COOLDOWN_MS = 10 * 1000;
 const PASTEL_BLUE = 0xaeefff;
-const AI_LOG_COLOR = 0xcba6f7;
 
 const ANSWER_EMOJI_NAMES = ['1_', '2_', '3_', '4_'];
 const RIGHT_EMOJI_NAMES = ['right1', 'right2', 'right3'];
 const WRONG_EMOJI_NAMES = ['wrong1', 'wrong2', 'wrong3'];
 const FIRST_QUESTION_EMOJI = 'first1';
-
-const AI_LOG_CHANNEL_ID = '1499622919620264106';
-const NSFW_AI_CHANNEL_ID = '1371340983752724561';
 
 const client = new Client({
   intents: [
@@ -32,10 +34,6 @@ const client = new Client({
   ]
 });
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
 // ===== DATA =====
 let cards = [];
 let history = [];
@@ -44,10 +42,6 @@ let score = 0;
 let total = 0;
 let maxQuestions = null;
 let activeCollector = null;
-
-const aiMessageOwners = new Map();
-const aiFollowUpSessions = new Map();
-const aiCooldowns = new Map();
 
 // load saved data
 if (fs.existsSync('data.json')) {
@@ -168,7 +162,7 @@ function createEmptyCardsEmbed(reason) {
     [
       reason,
       '',
-      'Add one with `?add korean | romanization`.'
+      'Add one with `;add korean | romanization` or `chi add korean | romanization`.'
     ].join('\n')
   );
 }
@@ -177,206 +171,27 @@ function createActionEmbed(title, lines) {
   return createBlueEmbed(title, lines.join('\n'));
 }
 
-function createAIThinkingEmbed() {
-  return new EmbedBuilder()
-    .setColor(PASTEL_BLUE)
-    .setTitle('☁️ thinking...');
-}
+function parsePrefixedCommand(content) {
+  const trimmedContent = content.trim();
 
-function createAIResponseEmbed(responseText) {
-  return new EmbedBuilder()
-    .setColor(PASTEL_BLUE)
-    .setTitle('✧ response')
-    .setDescription(responseText);
-}
+  if (!trimmedContent) return null;
 
-function createAIErrorEmbed() {
-  return new EmbedBuilder()
-    .setColor(PASTEL_BLUE)
-    .setTitle('error')
-    .setDescription('algo salió mal... pregunta otra vez.');
-}
+  const matchedPrefix = trimmedContent.startsWith(';')
+    ? ';'
+    : trimmedContent.match(/^chi\s+/i)?.[0];
 
-function createDeleteAIRow() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('delete_ai')
-      .setEmoji('🗑️')
-      .setStyle(ButtonStyle.Danger)
-  );
-}
+  if (!matchedPrefix) return null;
 
-function createAICooldownEmbed(remainingMs) {
-  const seconds = Math.ceil(remainingMs / 1000);
+  const body = trimmedContent.slice(matchedPrefix.length).trim();
 
-  return createActionEmbed('✦ cooldown ✦', [
-    `Please wait ${seconds}s before asking again.`
-  ]);
-}
+  if (!body) return null;
 
-function truncateField(value, maxLength = 1024) {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength - 3)}...`;
-}
-
-function createAILogEmbed(message, prompt) {
-  const sentAt = Math.floor(message.createdTimestamp / 1000);
-
-  return new EmbedBuilder()
-    .setColor(AI_LOG_COLOR)
-    .setTitle('AI Log')
-    .addFields(
-      {
-        name: 'User',
-        value: `${message.author.username} (${message.author.id})`
-      },
-      {
-        name: 'Question',
-        value: truncateField(prompt)
-      },
-      {
-        name: 'Time',
-        value: `<t:${sentAt}:F>`
-      }
-    );
-}
-
-function getRemainingAICooldown(userId) {
-  const endsAt = aiCooldowns.get(userId);
-
-  if (!endsAt) return 0;
-
-  const remainingMs = endsAt - Date.now();
-
-  if (remainingMs <= 0) {
-    aiCooldowns.delete(userId);
-    return 0;
-  }
-
-  return remainingMs;
-}
-
-function setAICooldown(userId) {
-  aiCooldowns.set(userId, Date.now() + AI_COOLDOWN_MS);
-}
-
-function storeAIResponseContext(botMessageId, userId) {
-  const timestamp = Date.now();
-
-  aiMessageOwners.set(botMessageId, userId);
-  aiFollowUpSessions.set(botMessageId, {
-    userId,
-    botMessageId,
-    timestamp,
-    expiresAt: timestamp + AI_FOLLOW_UP_WINDOW_MS
-  });
-}
-
-function clearAIResponseContext(botMessageId) {
-  aiMessageOwners.delete(botMessageId);
-  aiFollowUpSessions.delete(botMessageId);
-}
-
-function getValidFollowUpSession(message) {
-  const replyToMessageId = message.reference?.messageId;
-
-  if (!replyToMessageId) return null;
-
-  const session = aiFollowUpSessions.get(replyToMessageId);
-
-  if (!session) return null;
-
-  if (session.expiresAt <= Date.now()) {
-    aiFollowUpSessions.delete(replyToMessageId);
-    return null;
-  }
-
-  if (session.userId !== message.author.id) {
-    return null;
-  }
-
-  return session;
-}
-
-async function sendAILog(message, prompt) {
-  const logChannel = await client.channels.fetch(AI_LOG_CHANNEL_ID);
-
-  if (!logChannel || !logChannel.isTextBased()) {
-    throw new Error('AI log channel is unavailable.');
-  }
-
-  await logChannel.send({
-    embeds: [createAILogEmbed(message, prompt)]
-  });
-}
-
-async function getSafeAIResponse(message, prompt) {
-  const response = await openai.responses.create({
-    model: 'gpt-4o-mini',
-    input: prompt
-  });
-
-  const aiText = response.output_text;
-
-  if (typeof aiText !== 'string' || aiText.length === 0) {
-    throw new Error('OpenAI returned an empty response.');
-  }
-
-  if (message.channel.id === NSFW_AI_CHANNEL_ID) {
-    return aiText;
-  }
-
-  const moderation = await openai.moderations.create({
-    input: aiText
-  });
-
-  if (moderation.results?.[0]?.flagged) {
-    return 'Mi sistema encontró contenido explícito en tu solicitud';
-  }
-
-  return aiText;
-}
-
-async function handleAIPrompt(message, prompt) {
-  const remainingCooldown = getRemainingAICooldown(message.author.id);
-
-  if (remainingCooldown > 0) {
-    return message.reply({
-      embeds: [createAICooldownEmbed(remainingCooldown)]
-    });
-  }
-
-  setAICooldown(message.author.id);
-
-  const reply = await message.reply({
-    embeds: [createAIThinkingEmbed()]
-  });
-
-  try {
-    const aiText = await getSafeAIResponse(message, prompt);
-
-    await reply.edit({
-      content: null,
-      embeds: [createAIResponseEmbed(aiText)],
-      components: [createDeleteAIRow()]
-    });
-
-    storeAIResponseContext(reply.id, message.author.id);
-    await sendAILog(message, prompt);
-  } catch (error) {
-    console.error('AI prompt failed:', error);
-    clearAIResponseContext(reply.id);
-
-    try {
-      await reply.edit({
-        content: null,
-        embeds: [createAIErrorEmbed()],
-        components: []
-      });
-    } catch (editError) {
-      console.error('Failed to edit AI error state:', editError);
-    }
-  }
+  const parts = body.split(/\s+/);
+  return {
+    prefix: matchedPrefix === ';' ? ';' : 'chi ',
+    commandName: parts[0].toLowerCase(),
+    args: parts.slice(1)
+  };
 }
 
 // ===== READY =====
@@ -388,35 +203,42 @@ client.once('ready', () => {
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
-  const trimmedContent = message.content.trim();
-  const chiAskMatch = trimmedContent.match(/^chi\s+ask\s+([\s\S]+)$/i);
+  const isReply = Boolean(message.reference?.messageId);
+  const parsedCommand = parsePrefixedCommand(message.content);
 
-  if (chiAskMatch) {
-    return handleAIPrompt(message, chiAskMatch[1]);
-  }
-
-  const followUpSession = getValidFollowUpSession(message);
-
-  if (!message.content.startsWith('?')) {
-    if (followUpSession && trimmedContent.length > 0) {
-      return handleAIPrompt(message, message.content);
+  if (!parsedCommand) {
+    if (isReply) {
+      const handledFollowUp = await ask.handleFollowUp(message);
+      if (handledFollowUp) return;
     }
 
     return;
   }
 
-  const args = message.content.slice(1).trim().split(' ');
-  const command = args[0];
+  if (parsedCommand.prefix === 'chi ' && parsedCommand.commandName === 'ask') {
+    return ask.execute(message);
+  }
+
+  if (moderationCommands[parsedCommand.commandName]) {
+    return moderationCommands[parsedCommand.commandName].execute(message, parsedCommand.args);
+  }
+
+  const { commandName: command, args } = parsedCommand;
 
   // ===== ADD =====
   if (command === 'add') {
-    const text = args.slice(1).join(' ');
+    const text = args.join(' ');
     const parts = text.split('|');
 
     if (parts.length < 2) {
       return message.reply({
         embeds: [
-          createActionEmbed('✦ add format ✦', ['Use:', '', '`?add korean | romanization`'])
+          createActionEmbed('✦ add format ✦', [
+            'Use:',
+            '',
+            '`;add korean | romanization`',
+            '`chi add korean | romanization`'
+          ])
         ]
       });
     }
@@ -459,7 +281,7 @@ client.on('messageCreate', async message => {
     quizActive = true;
     score = 0;
     total = 0;
-    maxQuestions = args[1] ? parseInt(args[1]) : null;
+    maxQuestions = args[0] ? parseInt(args[0]) : null;
 
     if (activeCollector) {
       activeCollector.stop('restart');
@@ -495,7 +317,7 @@ client.on('messageCreate', async message => {
 
   // ===== DELETE CARD =====
   if (command === 'deletecard') {
-    const index = parseInt(args[1]) - 1;
+    const index = parseInt(args[0]) - 1;
     if (isNaN(index) || !cards[index]) {
       return message.reply({
         embeds: [
@@ -541,39 +363,16 @@ client.on('messageCreate', async message => {
       components: [row]
     });
   }
-
-  if (followUpSession && trimmedContent.length > 0) {
-    return handleAIPrompt(message, message.content);
-  }
 });
 
 // ===== BUTTON HANDLER =====
 client.on('interactionCreate', async interaction => {
+  const handledAIInteraction = await ask.handleInteraction(interaction);
+  if (handledAIInteraction) return;
+
   if (!interaction.isButton()) return;
 
   const id = interaction.customId;
-
-  if (id === 'delete_ai') {
-    const ownerId = aiMessageOwners.get(interaction.message.id);
-
-    if (!ownerId || interaction.user.id !== ownerId) {
-      return interaction.reply({
-        embeds: [
-          createActionEmbed('✦ not allowed ✦', [
-            'Only the original user can delete this AI message.'
-          ])
-        ],
-        ephemeral: true
-      });
-    }
-
-    clearAIResponseContext(interaction.message.id);
-    return interaction.update({
-      content: '...',
-      embeds: [],
-      components: []
-    });
-  }
 
   if (id.startsWith('del_yes_')) {
     const index = parseInt(id.split('_')[2]);
