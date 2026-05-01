@@ -185,10 +185,6 @@ function getRobloxProfileUrl(userId) {
   return `https://www.roblox.com/users/${userId}/profile`;
 }
 
-function getRolimonsProfileUrl(userId) {
-  return `https://www.rolimons.com/player/${userId}`;
-}
-
 async function resolveRobloxUser(query) {
   const trimmedQuery = query.trim();
 
@@ -283,6 +279,18 @@ async function fetchRolimonsPlayerData(userId) {
   }
 }
 
+async function fetchRolimonsPlayerInfo(userId) {
+  try {
+    const data = await fetchJson(`https://api.rolimons.com/players/v1/playerinfo/${userId}`, {
+      headers: ROLIMONS_HEADERS
+    });
+    if (!data?.success) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchRolimonsItemDetails() {
   if (cachedRolimonsItems && Date.now() - cachedRolimonsItemsAt < ITEM_DETAILS_CACHE_MS) {
     return cachedRolimonsItems;
@@ -350,11 +358,13 @@ async function handleUserCommand(message, query) {
     : { friends: null, followers: null, followings: null };
   const headshotUrl = headshotResult.status === 'fulfilled' ? headshotResult.value : null;
   const rolimonsData = rolimonsResult.status === 'fulfilled' ? rolimonsResult.value : null;
+  const rolimonsPlayerInfo = await fetchRolimonsPlayerInfo(userId);
 
   let rap = null;
   let value = null;
+  let usingCachedRolimonsInfo = false;
 
-  if (rolimonsData) {
+  if (rolimonsData && !rolimonsData.playerPrivacyEnabled) {
     try {
       const itemDetails = await fetchRolimonsItemDetails();
       const totals = calculateRolimonsTotals(
@@ -368,7 +378,31 @@ async function handleUserCommand(message, query) {
     } catch (error) {
       console.error('No se pudieron calcular las estadísticas de Rolimons:', error);
     }
+  } else if (rolimonsPlayerInfo) {
+    rap = typeof rolimonsPlayerInfo.rap === 'number' ? rolimonsPlayerInfo.rap : null;
+    value = typeof rolimonsPlayerInfo.value === 'number' ? rolimonsPlayerInfo.value : null;
+    usingCachedRolimonsInfo = rap !== null || value !== null;
   }
+
+  const inventoryValue = rolimonsData
+    ? rolimonsData.playerPrivacyEnabled
+      ? 'Privado (RAP guardado)'
+      : 'Público'
+    : 'No disponible';
+
+  const rapValue =
+    typeof rap === 'number'
+      ? `${formatNumber(rap)}${usingCachedRolimonsInfo ? ' (último guardado)' : ''}${
+        rolimonsData?.chartNominalScanTime ? `\n<t:${rolimonsData.chartNominalScanTime}:d>` : ''
+      }`
+      : 'Sin datos';
+
+  const valueFieldValue =
+    typeof value === 'number'
+      ? `${formatNumber(value)}${usingCachedRolimonsInfo ? ' (último guardado)' : ''}${
+        rolimonsData?.chartNominalScanTime ? `\n<t:${rolimonsData.chartNominalScanTime}:d>` : ''
+      }`
+      : 'Sin datos';
 
   const embed = new EmbedBuilder()
     .setColor(PASTEL_BLUE)
@@ -388,11 +422,7 @@ async function handleUserCommand(message, query) {
     },
     {
       name: 'Inventario',
-      value: rolimonsData
-        ? rolimonsData.playerPrivacyEnabled
-          ? 'Privado'
-          : 'Público'
-        : 'No disponible',
+      value: inventoryValue,
       inline: true
     },
     {
@@ -405,20 +435,12 @@ async function handleUserCommand(message, query) {
   embed.addFields(
     {
       name: 'RAP',
-      value: rolimonsData === null
-        ? 'No disponible'
-        : typeof rap === 'number'
-        ? `${formatNumber(rap)}\n<t:${rolimonsData?.chartNominalScanTime}:d>`
-        : 'Sin datos',
+      value: rapValue,
       inline: true
     },
     {
       name: 'Valor',
-      value: rolimonsData === null
-        ? 'No disponible'
-        : typeof value === 'number'
-        ? `${formatNumber(value)}\n<t:${rolimonsData?.chartNominalScanTime}:d>`
-        : 'Sin datos',
+      value: valueFieldValue,
       inline: true
     },
     {
