@@ -7,16 +7,19 @@ const {
   EmbedBuilder
 } = require('discord.js');
 const fs = require('fs');
+const OpenAI = require('openai');
 
 const QUIZ_TIMEOUT_SECONDS = 15;
 const PASTEL_BLUE = 0xaeefff;
-const PASTEL_GREEN = 0xb4f8c8;
-const PASTEL_PINK = 0xffb3c6;
+const AI_LOG_COLOR = 0xcba6f7;
 
 const ANSWER_EMOJI_NAMES = ['1_', '2_', '3_', '4_'];
 const RIGHT_EMOJI_NAMES = ['right1', 'right2', 'right3'];
 const WRONG_EMOJI_NAMES = ['wrong1', 'wrong2', 'wrong3'];
 const FIRST_QUESTION_EMOJI = 'first1';
+
+const AI_LOG_CHANNEL_ID = '1499622919620264106';
+const NSFW_AI_CHANNEL_ID = '1371340983752724561';
 
 const client = new Client({
   intents: [
@@ -27,6 +30,10 @@ const client = new Client({
   ]
 });
 
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
 // ===== DATA =====
 let cards = [];
 let history = [];
@@ -35,6 +42,8 @@ let score = 0;
 let total = 0;
 let maxQuestions = null;
 let activeCollector = null;
+
+const aiMessageOwners = new Map();
 
 // load saved data
 if (fs.existsSync('data.json')) {
@@ -164,6 +173,133 @@ function createActionEmbed(title, lines) {
   return createBlueEmbed(title, lines.join('\n'));
 }
 
+function createAIThinkingEmbed() {
+  return new EmbedBuilder()
+    .setColor(PASTEL_BLUE)
+    .setTitle('☁️ thinking...');
+}
+
+function createAIResponseEmbed(responseText) {
+  return new EmbedBuilder()
+    .setColor(PASTEL_BLUE)
+    .setTitle('✧ response')
+    .setDescription(responseText);
+}
+
+function createAIErrorEmbed() {
+  return new EmbedBuilder()
+    .setColor(PASTEL_BLUE)
+    .setTitle('error')
+    .setDescription('algo salió mal... pregunta otra vez.');
+}
+
+function createDeleteAIRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('delete_ai')
+      .setEmoji('🗑️')
+      .setStyle(ButtonStyle.Danger)
+  );
+}
+
+function truncateField(value, maxLength = 1024) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function createAILogEmbed(message, prompt) {
+  const sentAt = Math.floor(message.createdTimestamp / 1000);
+
+  return new EmbedBuilder()
+    .setColor(AI_LOG_COLOR)
+    .setTitle('AI Log')
+    .addFields(
+      {
+        name: 'User',
+        value: `${message.author.username} (${message.author.id})`
+      },
+      {
+        name: 'Question',
+        value: truncateField(prompt)
+      },
+      {
+        name: 'Time',
+        value: `<t:${sentAt}:F>`
+      }
+    );
+}
+
+async function sendAILog(message, prompt) {
+  const logChannel = await client.channels.fetch(AI_LOG_CHANNEL_ID);
+
+  if (!logChannel || !logChannel.isTextBased()) {
+    throw new Error('AI log channel is unavailable.');
+  }
+
+  await logChannel.send({
+    embeds: [createAILogEmbed(message, prompt)]
+  });
+}
+
+async function getSafeAIResponse(message, prompt) {
+  const response = await openai.responses.create({
+    model: 'gpt-4o-mini',
+    input: prompt
+  });
+
+  const aiText = response.output_text;
+
+  if (typeof aiText !== 'string' || aiText.length === 0) {
+    throw new Error('OpenAI returned an empty response.');
+  }
+
+  if (message.channel.id === NSFW_AI_CHANNEL_ID) {
+    return aiText;
+  }
+
+  const moderation = await openai.moderations.create({
+    input: aiText
+  });
+
+  if (moderation.results?.[0]?.flagged) {
+    return 'Mi sistema encontró contenido explícito en tu solicitud';
+  }
+
+  return aiText;
+}
+
+async function handleChiAsk(message, prompt) {
+  const reply = await message.reply({
+    embeds: [createAIThinkingEmbed()]
+  });
+
+  try {
+    const aiText = await getSafeAIResponse(message, prompt);
+
+    await reply.edit({
+      content: null,
+      embeds: [createAIResponseEmbed(aiText)],
+      components: [createDeleteAIRow()]
+    });
+
+    aiMessageOwners.set(reply.id, message.author.id);
+    await sendAILog(message, prompt);
+  } catch (error) {
+    console.error('chi ask failed:', error);
+    aiMessageOwners.delete(reply.id);
+
+    try {
+      await reply.edit({
+        content: null,
+        embeds: [createAIErrorEmbed()],
+        components: []
+      });
+    } catch (editError) {
+      console.error('Failed to edit chi ask error state:', editError);
+    }
+  }
+}
+
 // ===== READY =====
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
@@ -172,6 +308,14 @@ client.once('ready', () => {
 // ===== MESSAGE HANDLER =====
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
+
+  const trimmedContent = message.content.trim();
+  const chiAskMatch = trimmedContent.match(/^chi\s+ask\s+([\s\S]+)$/i);
+
+  if (chiAskMatch) {
+    return handleChiAsk(message, chiAskMatch[1]);
+  }
+
   if (!message.content.startsWith('?')) return;
 
   const args = message.content.slice(1).trim().split(' ');
@@ -317,6 +461,28 @@ client.on('interactionCreate', async interaction => {
   if (!interaction.isButton()) return;
 
   const id = interaction.customId;
+
+  if (id === 'delete_ai') {
+    const ownerId = aiMessageOwners.get(interaction.message.id);
+
+    if (!ownerId || interaction.user.id !== ownerId) {
+      return interaction.reply({
+        embeds: [
+          createActionEmbed('✦ not allowed ✦', [
+            'Only the original user can delete this AI message.'
+          ])
+        ],
+        ephemeral: true
+      });
+    }
+
+    aiMessageOwners.delete(interaction.message.id);
+    return interaction.update({
+      content: '...',
+      embeds: [],
+      components: []
+    });
+  }
 
   if (id.startsWith('del_yes_')) {
     const index = parseInt(id.split('_')[2]);
