@@ -19,7 +19,12 @@ const WRONG_EMOJI_NAMES = ['wrong1', 'wrong2', 'wrong3'];
 const FIRST_QUESTION_EMOJI = 'first1';
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 // ===== DATA =====
@@ -42,6 +47,16 @@ function saveData() {
   fs.writeFileSync('data.json', JSON.stringify({ cards, history }, null, 2));
 }
 
+async function ensureGuildEmojis(context) {
+  if (!context.guild) return;
+
+  try {
+    await context.guild.emojis.fetch();
+  } catch (error) {
+    console.error('Failed to fetch guild emojis:', error);
+  }
+}
+
 function getGuildEmoji(context, name) {
   return context.guild?.emojis.cache.find(emoji => emoji.name === name) || null;
 }
@@ -53,7 +68,7 @@ function getEmojiMention(context, name) {
 
 function getReactionEmoji(context, name) {
   const emoji = getGuildEmoji(context, name);
-  return emoji ? emoji.id : name;
+  return emoji ? emoji.identifier : null;
 }
 
 function pickRandomEmojiMention(context, names) {
@@ -248,6 +263,8 @@ client.on('interactionCreate', async interaction => {
 async function sendQuestion(message) {
   if (!quizActive) return;
 
+  await ensureGuildEmojis(message);
+
   const correct = cards[Math.floor(Math.random() * cards.length)];
 
   let options = [correct];
@@ -264,11 +281,7 @@ async function sendQuestion(message) {
   const answerEmojis = ANSWER_EMOJI_NAMES.slice(0, options.length).map(name => ({
     name,
     reaction: getReactionEmoji(message, name)
-  }));
-
-  for (const emoji of answerEmojis) {
-    await quizMessage.react(emoji.reaction);
-  }
+  })).filter(emoji => emoji.reaction);
 
   const filter = (reaction, user) =>
     answerEmojis.some(emoji => reaction.emoji.name === emoji.name) && user.id === message.author.id;
@@ -280,6 +293,20 @@ async function sendQuestion(message) {
   });
 
   activeCollector = collector;
+
+  try {
+    for (const emoji of answerEmojis) {
+      await quizMessage.react(emoji.reaction);
+    }
+  } catch (error) {
+    console.error('Failed to add quiz reactions:', error);
+    quizActive = false;
+    activeCollector.stop('reaction_error');
+    activeCollector = null;
+    return quizMessage.reply(
+      'I could not add the quiz reactions. Check that the emoji names exist in this server and that the bot has Add Reactions and Read Message History permissions.'
+    );
+  }
 
   collector.on('collect', async reaction => {
     const index = answerEmojis.findIndex(emoji => reaction.emoji.name === emoji.name);
