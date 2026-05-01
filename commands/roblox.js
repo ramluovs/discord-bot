@@ -6,6 +6,12 @@ const RIGHT_EMOJI_NAMES = ['right1', 'right2', 'right3'];
 const WRONG_EMOJI_NAMES = ['wrong1', 'wrong2', 'wrong3'];
 const ITEM_DETAILS_CACHE_MS = 60 * 1000;
 const USERNAME_VALIDATE_BIRTHDAY = '2000-01-01T00:00:00.000Z';
+const ROLIMONS_BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
+const ROLIMONS_HEADERS = {
+  Referer: 'https://www.rolimons.com/',
+  'User-Agent': ROLIMONS_BROWSER_USER_AGENT
+};
 
 let cachedRolimonsItems = null;
 let cachedRolimonsItemsAt = 0;
@@ -261,13 +267,20 @@ async function fetchAvatarUrl(userId) {
 }
 
 async function fetchRolimonsPlayerData(userId) {
-  const data = await fetchJson(`https://api.rolimons.com/players/v1/playerassets/${userId}`);
+  try {
+    const data = await fetchJson(`https://api.rolimons.com/players/v1/playerassets/${userId}`, {
+      headers: ROLIMONS_HEADERS
+    });
 
-  if (!data?.success) {
-    throw new Error(data?.message || 'No pude obtener los datos de Rolimons.');
+    if (!data?.success) {
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('No se pudieron obtener los datos de Rolimons:', error);
+    return null;
   }
-
-  return data;
 }
 
 async function fetchRolimonsItemDetails() {
@@ -275,7 +288,9 @@ async function fetchRolimonsItemDetails() {
     return cachedRolimonsItems;
   }
 
-  const data = await fetchJson('https://api.rolimons.com/items/v2/itemdetails');
+  const data = await fetchJson('https://api.rolimons.com/items/v2/itemdetails', {
+    headers: ROLIMONS_HEADERS
+  });
 
   if (!data?.success || !data?.items) {
     throw new Error('No pude obtener los detalles de items de Rolimons.');
@@ -390,14 +405,18 @@ async function handleUserCommand(message, query) {
   embed.addFields(
     {
       name: 'RAP',
-      value: typeof rap === 'number'
+      value: rolimonsData === null
+        ? 'No disponible'
+        : typeof rap === 'number'
         ? `${formatNumber(rap)}\n<t:${rolimonsData?.chartNominalScanTime}:d>`
         : 'Sin datos',
       inline: true
     },
     {
       name: 'Valor',
-      value: typeof value === 'number'
+      value: rolimonsData === null
+        ? 'No disponible'
+        : typeof value === 'number'
         ? `${formatNumber(value)}\n<t:${rolimonsData?.chartNominalScanTime}:d>`
         : 'Sin datos',
       inline: true
