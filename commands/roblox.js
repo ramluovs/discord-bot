@@ -317,22 +317,10 @@ function calculateRolimonsTotals(playerAssets, itemDetails, inventoryPrivate) {
   return { rap, value };
 }
 
-function formatRolimonsFieldValue(stat, profileUrl, cacheUnix) {
-  const dateText =
-    typeof cacheUnix === 'number' && cacheUnix > 0
-      ? formatSpanishDate(cacheUnix)
-      : 'No disponible';
-
-  const statText = typeof stat === 'number' ? formatNumber(stat) : 'Sin datos';
-
-  return `${statText}\n[Rolimons](${profileUrl}) • ${dateText}`;
-}
-
 async function handleUserCommand(message, query) {
   const user = await resolveRobloxUser(query);
   const userId = user.id;
   const profileUrl = getRobloxProfileUrl(userId);
-  const rolimonsProfileUrl = getRolimonsProfileUrl(userId);
 
   const [presenceResult, countsResult, headshotResult, rolimonsResult] = await Promise.allSettled([
     fetchPresence(userId),
@@ -367,11 +355,11 @@ async function handleUserCommand(message, query) {
     }
   }
 
-  const embed = createEmbed(
-    `${user.displayName} (@${user.name})`,
-    truncateDescription(user.description)
-  )
-    .setURL(profileUrl);
+  const embed = new EmbedBuilder()
+    .setColor(PASTEL_BLUE)
+    .setTitle(`${user.displayName} (@${user.name})`)
+    .setURL(profileUrl)
+    .setDescription(truncateDescription(user.description));
 
   if (headshotUrl) {
     embed.setThumbnail(headshotUrl);
@@ -380,7 +368,7 @@ async function handleUserCommand(message, query) {
   embed.addFields(
     {
       name: 'ID',
-      value: String(user.id),
+      value: `\`${user.id}\``,
       inline: true
     },
     {
@@ -393,15 +381,35 @@ async function handleUserCommand(message, query) {
       inline: true
     },
     {
+      name: '\u200B',
+      value: '\u200B',
+      inline: true
+    }
+  );
+
+  embed.addFields(
+    {
       name: 'RAP',
-      value: formatRolimonsFieldValue(rap, rolimonsProfileUrl, rolimonsData?.chartNominalScanTime),
+      value: typeof rap === 'number'
+        ? `${formatNumber(rap)}\n<t:${rolimonsData?.chartNominalScanTime}:d>`
+        : 'Sin datos',
       inline: true
     },
     {
       name: 'Valor',
-      value: formatRolimonsFieldValue(value, rolimonsProfileUrl, rolimonsData?.chartNominalScanTime),
+      value: typeof value === 'number'
+        ? `${formatNumber(value)}\n<t:${rolimonsData?.chartNominalScanTime}:d>`
+        : 'Sin datos',
       inline: true
     },
+    {
+      name: '\u200B',
+      value: '\u200B',
+      inline: true
+    }
+  );
+
+  embed.addFields(
     {
       name: 'Creado',
       value: formatSpanishDate(user.created),
@@ -415,24 +423,27 @@ async function handleUserCommand(message, query) {
     {
       name: 'Última vez cacheado',
       value:
-        typeof rolimonsData?.chartNominalScanTime === 'number'
+        rolimonsData?.chartNominalScanTime
           ? `<t:${rolimonsData.chartNominalScanTime}:f>`
           : 'No disponible',
       inline: true
-    },
+    }
+  );
+
+  embed.addFields(
     {
       name: 'Amigos',
-      value: counts.friends === null ? 'No disponible' : formatNumber(counts.friends),
+      value: counts.friends !== null ? formatNumber(counts.friends) : '0',
       inline: true
     },
     {
       name: 'Seguidores',
-      value: counts.followers === null ? 'No disponible' : formatNumber(counts.followers),
+      value: counts.followers !== null ? formatNumber(counts.followers) : '0',
       inline: true
     },
     {
       name: 'Siguiendo',
-      value: counts.followings === null ? 'No disponible' : formatNumber(counts.followings),
+      value: counts.followings !== null ? formatNumber(counts.followings) : '0',
       inline: true
     }
   );
