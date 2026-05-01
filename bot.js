@@ -10,6 +10,8 @@ const fs = require('fs');
 const OpenAI = require('openai');
 
 const QUIZ_TIMEOUT_SECONDS = 15;
+const AI_FOLLOW_UP_WINDOW_MS = 60 * 1000;
+const AI_COOLDOWN_MS = 10 * 1000;
 const PASTEL_BLUE = 0xaeefff;
 const AI_LOG_COLOR = 0xcba6f7;
 
@@ -44,6 +46,8 @@ let maxQuestions = null;
 let activeCollector = null;
 
 const aiMessageOwners = new Map();
+const aiFollowUpSessions = new Map();
+const aiCooldowns = new Map();
 
 // load saved data
 if (fs.existsSync('data.json')) {
@@ -202,6 +206,14 @@ function createDeleteAIRow() {
   );
 }
 
+function createAICooldownEmbed(remainingMs) {
+  const seconds = Math.ceil(remainingMs / 1000);
+
+  return createActionEmbed('✦ cooldown ✦', [
+    `Please wait ${seconds}s before asking again.`
+  ]);
+}
+
 function truncateField(value, maxLength = 1024) {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength - 3)}...`;
@@ -227,6 +239,63 @@ function createAILogEmbed(message, prompt) {
         value: `<t:${sentAt}:F>`
       }
     );
+}
+
+function getRemainingAICooldown(userId) {
+  const endsAt = aiCooldowns.get(userId);
+
+  if (!endsAt) return 0;
+
+  const remainingMs = endsAt - Date.now();
+
+  if (remainingMs <= 0) {
+    aiCooldowns.delete(userId);
+    return 0;
+  }
+
+  return remainingMs;
+}
+
+function setAICooldown(userId) {
+  aiCooldowns.set(userId, Date.now() + AI_COOLDOWN_MS);
+}
+
+function storeAIResponseContext(botMessageId, userId) {
+  const timestamp = Date.now();
+
+  aiMessageOwners.set(botMessageId, userId);
+  aiFollowUpSessions.set(botMessageId, {
+    userId,
+    botMessageId,
+    timestamp,
+    expiresAt: timestamp + AI_FOLLOW_UP_WINDOW_MS
+  });
+}
+
+function clearAIResponseContext(botMessageId) {
+  aiMessageOwners.delete(botMessageId);
+  aiFollowUpSessions.delete(botMessageId);
+}
+
+function getValidFollowUpSession(message) {
+  const replyToMessageId = message.reference?.messageId;
+
+  if (!replyToMessageId) return null;
+
+  const session = aiFollowUpSessions.get(replyToMessageId);
+
+  if (!session) return null;
+
+  if (session.expiresAt <= Date.now()) {
+    aiFollowUpSessions.delete(replyToMessageId);
+    return null;
+  }
+
+  if (session.userId !== message.author.id) {
+    return null;
+  }
+
+  return session;
 }
 
 async function sendAILog(message, prompt) {
@@ -268,7 +337,17 @@ async function getSafeAIResponse(message, prompt) {
   return aiText;
 }
 
-async function handleChiAsk(message, prompt) {
+async function handleAIPrompt(message, prompt) {
+  const remainingCooldown = getRemainingAICooldown(message.author.id);
+
+  if (remainingCooldown > 0) {
+    return message.reply({
+      embeds: [createAICooldownEmbed(remainingCooldown)]
+    });
+  }
+
+  setAICooldown(message.author.id);
+
   const reply = await message.reply({
     embeds: [createAIThinkingEmbed()]
   });
@@ -282,11 +361,11 @@ async function handleChiAsk(message, prompt) {
       components: [createDeleteAIRow()]
     });
 
-    aiMessageOwners.set(reply.id, message.author.id);
+    storeAIResponseContext(reply.id, message.author.id);
     await sendAILog(message, prompt);
   } catch (error) {
-    console.error('chi ask failed:', error);
-    aiMessageOwners.delete(reply.id);
+    console.error('AI prompt failed:', error);
+    clearAIResponseContext(reply.id);
 
     try {
       await reply.edit({
@@ -295,7 +374,7 @@ async function handleChiAsk(message, prompt) {
         components: []
       });
     } catch (editError) {
-      console.error('Failed to edit chi ask error state:', editError);
+      console.error('Failed to edit AI error state:', editError);
     }
   }
 }
@@ -313,10 +392,18 @@ client.on('messageCreate', async message => {
   const chiAskMatch = trimmedContent.match(/^chi\s+ask\s+([\s\S]+)$/i);
 
   if (chiAskMatch) {
-    return handleChiAsk(message, chiAskMatch[1]);
+    return handleAIPrompt(message, chiAskMatch[1]);
   }
 
-  if (!message.content.startsWith('?')) return;
+  const followUpSession = getValidFollowUpSession(message);
+
+  if (!message.content.startsWith('?')) {
+    if (followUpSession && trimmedContent.length > 0) {
+      return handleAIPrompt(message, message.content);
+    }
+
+    return;
+  }
 
   const args = message.content.slice(1).trim().split(' ');
   const command = args[0];
@@ -454,6 +541,10 @@ client.on('messageCreate', async message => {
       components: [row]
     });
   }
+
+  if (followUpSession && trimmedContent.length > 0) {
+    return handleAIPrompt(message, message.content);
+  }
 });
 
 // ===== BUTTON HANDLER =====
@@ -476,7 +567,7 @@ client.on('interactionCreate', async interaction => {
       });
     }
 
-    aiMessageOwners.delete(interaction.message.id);
+    clearAIResponseContext(interaction.message.id);
     return interaction.update({
       content: '...',
       embeds: [],
