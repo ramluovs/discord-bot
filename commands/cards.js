@@ -8,8 +8,9 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_FILE_PATH = path.join(__dirname, '..', 'data.json');
-const QUIZ_TIMEOUT_SECONDS = 15;
+const QUIZ_TIMEOUT_SECONDS = 30;
 const PASTEL_BLUE = 0xaeefff;
+const ALLOWED_ROLES = ['1340864854243803248', '1500217745889824898'];
 
 const ANSWER_EMOJI_NAMES = ['1_', '2_', '3_', '4_'];
 const RIGHT_EMOJI_NAMES = ['right1', 'right2', 'right3'];
@@ -26,12 +27,16 @@ let activeCollector = null;
 
 if (fs.existsSync(DATA_FILE_PATH)) {
   const data = JSON.parse(fs.readFileSync(DATA_FILE_PATH));
-  cards = data.cards || [];
+  cards = (data.cards || []).map(c => ({ korean: c.korean, roman: c.roman, audioUrl: c.audioUrl || null }));
   history = data.history || [];
 }
 
 function saveData() {
   fs.writeFileSync(DATA_FILE_PATH, JSON.stringify({ cards, history }, null, 2));
+}
+
+function hasCardRole(message) {
+  return message.member?.roles.cache.some(role => ALLOWED_ROLES.includes(role.id)) ?? false;
 }
 
 async function ensureGuildEmojis(context) {
@@ -88,7 +93,8 @@ function createQuestionEmbed(message, correct, options) {
         '',
         ...options.map((option, index) => `${index + 1}. ${option.roman}`),
         '',
-        `⏱ answer within: <t:${time}:R>`
+        `⏱ answer within: <t:${time}:R>`,
+        ...(correct.audioUrl ? [] : ['', '-# no audio attached'])
       ].join('\n')
     );
 }
@@ -142,7 +148,7 @@ function createEmptyCardsEmbed(reason) {
     [
       reason,
       '',
-      'Add one with `;add korean | romanization` or `chi add korean | romanization`.'
+      'Add one with `;addcard korean | romanization` or `chi addcard korean | romanization`.'
     ].join('\n')
   );
 }
@@ -168,7 +174,11 @@ async function sendQuestion(message) {
 
   const correctIndex = options.findIndex(option => option === correct);
   const questionEmbed = createQuestionEmbed(message, correct, options);
-  const quizMessage = await message.reply({ embeds: [questionEmbed] });
+  const messagePayload = { embeds: [questionEmbed] };
+  if (correct.audioUrl) {
+    messagePayload.files = [{ attachment: correct.audioUrl, name: 'audio.mp3' }];
+  }
+  const quizMessage = await message.reply(messagePayload);
   const answerEmojis = ANSWER_EMOJI_NAMES.slice(0, options.length).map(name => ({
     name,
     reaction: getReactionEmoji(message, name)
@@ -254,9 +264,11 @@ async function sendQuestion(message) {
 }
 
 async function execute(message, parsedCommand) {
+  if (!hasCardRole(message)) return false;
+
   const { commandName: command, args } = parsedCommand;
 
-  if (command === 'add') {
+  if (command === 'addcard') {
     const text = args.join(' ');
     const parts = text.split('|');
 
@@ -266,8 +278,8 @@ async function execute(message, parsedCommand) {
           createActionEmbed('✦ add format ✦', [
             'Use:',
             '',
-            '`;add korean | romanization`',
-            '`chi add korean | romanization`'
+            '`;addcard korean | romanization`',
+            '`chi addcard korean | romanization`'
           ])
         ]
       });
@@ -275,15 +287,18 @@ async function execute(message, parsedCommand) {
 
     const korean = parts[0].trim();
     const roman = parts[1].trim();
+    const attachment = message.attachments.first();
+    const audioUrl = attachment && attachment.contentType?.startsWith('audio/') ? attachment.url : null;
 
-    cards.push({ korean, roman });
+    cards.push({ korean, roman, audioUrl });
     saveData();
 
     return message.reply({
       embeds: [
         createActionEmbed('✧ card saved ✧', [
           `Korean: **${korean}**`,
-          `Romanization: **${roman}**`
+          `Romanization: **${roman}**`,
+          `Audio: ${audioUrl ? 'attached' : 'none'}`
         ])
       ]
     });
