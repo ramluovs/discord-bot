@@ -6,6 +6,7 @@ const ask = require('./commands/ask');
 const cards = require('./commands/cards');
 const fun = require('./commands/fun');
 const roblox = require('./commands/roblox');
+const versus = require('./commands/moderation/versus');
 const moderationCommands = {
   ban: require('./commands/moderation/ban'),
   unban: require('./commands/moderation/unban'),
@@ -16,7 +17,10 @@ const moderationCommands = {
   verify: require('./commands/moderation/verify'),
   v: require('./commands/moderation/verify'),
   invite: require('./commands/moderation/invite'),
-  invitar: require('./commands/moderation/invite')
+  invitar: require('./commands/moderation/invite'),
+  versus,
+  versusadd: versus,
+  versusdelete: versus
 };
 
 const CARD_COMMANDS = ['add', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
