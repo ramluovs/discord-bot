@@ -8,7 +8,7 @@ module.exports = {
         new EmbedBuilder()
           .setColor(PASTEL_BLUE)
           .setTitle('✧ invitación')
-          .setDescription('[Link de invitación](https://discord.gg/HuRvGPKKtr)')
+          .setDescription('[Link](https://discord.gg/HuRvGPKKtr) de invitación: https://discord.gg/HuRvGPKKtr')
       ]
     });
   }
