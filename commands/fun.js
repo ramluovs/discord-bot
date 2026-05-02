@@ -414,6 +414,207 @@ async function handleTestBirthdayCommand(message) {
   });
 }
 
+async function handleBananaCommand(message) {
+  const size = Math.floor(Math.random() * 30) + 1;
+  const displayName = message.member?.displayName || message.author.username;
+
+  return message.reply({
+    content: `La banana de **${displayName}** mide **${size} cm** <:right3:1499652025129111572>`,
+    files: [{
+      attachment: 'https://cdn.discordapp.com/attachments/1340907464161497168/1500000254379036702/gradient-shaded-quirky-cartoon-banana-png.png?ex=69f6d799&is=69f58619&hm=84442edd898fe988a09c653db408817f772647abf98ae0b2b28a037d98a05777&',
+      name: 'banana.png'
+    }]
+  });
+}
+
+async function handleMonedaCommand(message) {
+  const flippingMsg = await message.reply({
+    content: 'Lanzando la moneda... <a:coinmariobrosarcade:1500007371420860436>'
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 5000));
+
+  const isHeads = Math.random() < 0.5;
+  const resultBold = isHeads ? '**cara**' : '**cruz**';
+  const speed = Math.floor(Math.random() * 150) + 50;
+  const rotations = Math.floor(Math.random() * 8) + 3;
+
+  await flippingMsg.edit({
+    content: `La moneda giró a ${speed} km/h, dio ${rotations} vueltas en el aire y cayó en ${resultBold}.`
+  });
+
+  const filter = m =>
+    m.reference?.messageId === flippingMsg.id &&
+    m.author.id === message.author.id &&
+    /^(otra|otra vez|again)$/i.test(m.content.trim());
+
+  const collector = message.channel.createMessageCollector({ filter, time: 60 * 1000 });
+
+  collector.on('collect', async m => {
+    const newResult = Math.random() < 0.5 ? '**cara**' : '**cruz**';
+    const newSpeed = Math.floor(Math.random() * 150) + 50;
+    const newRotations = Math.floor(Math.random() * 8) + 3;
+
+    const newFlip = await m.reply({ content: 'Lanzando la moneda... <a:coinmariobrosarcade:1500007371420860436>' });
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    await newFlip.edit({
+      content: `La moneda giró a ${newSpeed} km/h, dio ${newRotations} vueltas en el aire y cayó en ${newResult}.`
+    });
+  });
+}
+
+async function handleTicTacToeCommand(message, args) {
+  const challenger = message.author;
+  const opponent = message.mentions.users.first();
+
+  if (!opponent) {
+    return message.reply({
+      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('Debes etiquetar a alguien para jugar. Ejemplo: `;tictactoe @usuario`')]
+    });
+  }
+
+  if (opponent.id === challenger.id) {
+    return message.reply({
+      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('No puedes jugar contra ti mismo.')]
+    });
+  }
+
+  if (opponent.bot) {
+    return message.reply({
+      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('No puedes jugar contra un bot.')]
+    });
+  }
+
+  const players = Math.random() < 0.5
+    ? { X: challenger, O: opponent }
+    : { X: opponent, O: challenger };
+
+  let currentTurn = 'X';
+  const board = Array(9).fill(null);
+
+  const WIN_COMBOS = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6]
+  ];
+
+  function checkWinner(b) {
+    for (const [a, c, d] of WIN_COMBOS) {
+      if (b[a] && b[a] === b[c] && b[a] === b[d]) return b[a];
+    }
+    return null;
+  }
+
+  function buildRows(disabled = false) {
+    const rows = [];
+    for (let r = 0; r < 3; r++) {
+      const row = new ActionRowBuilder();
+      for (let c = 0; c < 3; c++) {
+        const idx = r * 3 + c;
+        const val = board[idx];
+        const btn = new ButtonBuilder()
+          .setCustomId(`ttt_${idx}`)
+          .setLabel(val || ' ')
+          .setStyle(val === 'X' ? ButtonStyle.Danger : val === 'O' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+          .setDisabled(disabled || val !== null);
+        row.addComponents(btn);
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  const expiresAt = Math.floor((Date.now() + 3 * 60 * 1000) / 1000);
+
+  const gameMsg = await message.reply({
+    content: `<@${challenger.id}> vs <@${opponent.id}>`,
+    embeds: [
+      new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setTitle('Tic Tac Toe')
+        .setDescription(`¡Es el turno de <@${players[currentTurn].id}>!\n\nExpira: <t:${expiresAt}:T>`)
+    ],
+    components: buildRows()
+  });
+
+  const filter = i =>
+    i.customId.startsWith('ttt_') &&
+    (i.user.id === players.X.id || i.user.id === players.O.id);
+
+  const collector = gameMsg.createMessageComponentCollector({ filter, time: 3 * 60 * 1000 });
+
+  collector.on('collect', async interaction => {
+    const currentPlayer = players[currentTurn];
+    if (interaction.user.id !== currentPlayer.id) {
+      return interaction.reply({ content: 'No es tu turno.', ephemeral: true });
+    }
+
+    const idx = parseInt(interaction.customId.replace('ttt_', ''));
+    if (board[idx]) {
+      return interaction.reply({ content: 'Esa casilla ya está ocupada.', ephemeral: true });
+    }
+
+    board[idx] = currentTurn;
+    const winner = checkWinner(board);
+    const isDraw = !winner && board.every(c => c !== null);
+
+    if (winner || isDraw) {
+      collector.stop('done');
+
+      let resultText = '';
+      if (isDraw) {
+        resultText = '¡Empate!';
+      } else {
+        const winnerUser = players[winner];
+        const loserUser = players[winner === 'X' ? 'O' : 'X'];
+        const winEmojis = ['<:right3:1499652025129111572>', '<a:right2:1499651329570897982>', '<a:right1:1499651327016439819>', '<a:first:1499651324600651877>'];
+        const loseEmojis = ['<a:wrong2:1499651340664705084>', '<a:wrong1:1499651337170718792>', '<a:wrong3:1499651342992408596>'];
+        const winEmoji = winEmojis[Math.floor(Math.random() * winEmojis.length)];
+        const loseEmoji = loseEmojis[Math.floor(Math.random() * loseEmojis.length)];
+        resultText = `<@${winnerUser.id}> ganó ${winEmoji}\n<@${loserUser.id}> perdió ${loseEmoji}`;
+      }
+
+      return interaction.update({
+        content: `<@${challenger.id}> vs <@${opponent.id}>`,
+        embeds: [
+          new EmbedBuilder()
+            .setColor(PASTEL_BLUE)
+            .setTitle('Tic Tac Toe')
+            .setDescription(resultText)
+        ],
+        components: buildRows(true)
+      });
+    }
+
+    currentTurn = currentTurn === 'X' ? 'O' : 'X';
+
+    return interaction.update({
+      content: `<@${challenger.id}> vs <@${opponent.id}>`,
+      embeds: [
+        new EmbedBuilder()
+          .setColor(PASTEL_BLUE)
+          .setTitle('Tic Tac Toe')
+          .setDescription(`¡Es el turno de <@${players[currentTurn].id}>!\n\nExpira: <t:${expiresAt}:T>`)
+      ],
+      components: buildRows()
+    });
+  });
+
+  collector.on('end', (_, reason) => {
+    if (reason !== 'done') {
+      gameMsg.edit({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(PASTEL_BLUE)
+            .setTitle('Tic Tac Toe')
+            .setDescription('El juego expiró por inactividad.')
+        ],
+        components: buildRows(true)
+      }).catch(() => {});
+    }
+  });
+}
+
 async function handleLinksCommand(message) {
   const linksData = loadLinks();
   const expiresAt = Math.floor((Date.now() + 3 * 60 * 1000) / 1000);
@@ -566,6 +767,9 @@ module.exports = {
     const { commandName, args } = parsedCommand;
     if (commandName === 'birthday') return handleBirthdayCommand(message, args);
     if (commandName === 'testbirthday') return handleTestBirthdayCommand(message);
+    if (commandName === 'banana') return handleBananaCommand(message);
+    if (commandName === 'moneda' || commandName === 'flip' || commandName === 'coin') return handleMonedaCommand(message);
+    if (commandName === 'tictactoe') return handleTicTacToeCommand(message, args);
     if (commandName === 'links') return handleLinksCommand(message);
     if (commandName === 'editlinks') return handleEditLinksCommand(message, args);
     return false;

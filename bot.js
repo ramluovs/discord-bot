@@ -12,11 +12,14 @@ const moderationCommands = {
   kick: require('./commands/moderation/kick'),
   timeout: require('./commands/moderation/timeout'),
   clear: require('./commands/moderation/clear'),
-  setnick: require('./commands/moderation/setnick')
+  setnick: require('./commands/moderation/setnick'),
+  verify: require('./commands/moderation/verify'),
+  invite: require('./commands/moderation/invite'),
+  invitar: require('./commands/moderation/invite')
 };
 
 const CARD_COMMANDS = ['add', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
-const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks'];
+const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks', 'banana', 'moneda', 'flip', 'coin', 'tictactoe'];
 const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group', 'rs'];
 
 const client = new Client({
