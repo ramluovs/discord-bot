@@ -244,9 +244,9 @@ function buildLinksEmbed(page) {
     page.entries.map(entry => {
       const entryLine = `[♡- ${entry.name}](${entry.link})`;
       return entry.id ? `${entryLine}\n-# ID: ${entry.id}` : entryLine;
-    }).join('\n'),
+    }).join('\n\n'),
     '',
-    'Si quieres el link directo de alguno, responde a mi mensaje con el nombre.'
+    '-# Si quieres el link directo de alguno, responde a mi mensaje con el nombre.'
   ].join('\n');
 
   return new EmbedBuilder()
