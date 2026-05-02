@@ -86,7 +86,7 @@ client.on('messageCreate', async message => {
   }
 
   if (moderationCommands[parsedCommand.commandName]) {
-    return moderationCommands[parsedCommand.commandName].execute(message, parsedCommand.args);
+    return moderationCommands[parsedCommand.commandName].execute(message, parsedCommand);
   }
 
   if (CARD_COMMANDS.includes(parsedCommand.commandName)) {
