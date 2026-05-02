@@ -4,9 +4,13 @@ const {
   ButtonStyle,
   EmbedBuilder
 } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 const OpenAI = require('openai');
 
-const AI_FOLLOW_UP_WINDOW_MS = 60 * 1000;
+const MEMORY_FILE = path.join(__dirname, '../data/ai_memory.json');
+const MAX_MEMORY_MESSAGES = 20;
+const AI_FOLLOW_UP_WINDOW_MS = 10 * 60 * 1000;
 const AI_COOLDOWN_MS = 10 * 1000;
 const PASTEL_BLUE = 0xaeefff;
 const AI_LOG_COLOR = 0xcba6f7;
@@ -20,6 +24,40 @@ const openai = new OpenAI({
 const aiMessageOwners = new Map();
 const aiFollowUpSessions = new Map();
 const aiCooldowns = new Map();
+
+function loadAllMemory() {
+  try {
+    if (!fs.existsSync(MEMORY_FILE)) return {};
+    return JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveAllMemory(data) {
+  try {
+    const dir = path.dirname(MEMORY_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('Failed to save AI memory:', e);
+  }
+}
+
+function getUserHistory(userId) {
+  const all = loadAllMemory();
+  return all[userId] || [];
+}
+
+function saveUserMessage(userId, role, content) {
+  const all = loadAllMemory();
+  if (!all[userId]) all[userId] = [];
+  all[userId].push({ role, content });
+  if (all[userId].length > MAX_MEMORY_MESSAGES) {
+    all[userId] = all[userId].slice(-MAX_MEMORY_MESSAGES);
+  }
+  saveAllMemory(all);
+}
 
 function createBlueEmbed(title, description) {
   return new EmbedBuilder()
@@ -165,17 +203,33 @@ async function sendAILog(message, prompt) {
   });
 }
 
-async function getSafeAIResponse(message, prompt) {
-  const response = await openai.responses.create({
+async function getSafeAIResponse(message, prompt, userId) {
+  const conversationHistory = getUserHistory(userId);
+
+  const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
-    input: prompt
+    messages: [
+      {
+        role: 'system',
+        content: `You are Chi, a sweet, cute and kawaii AI assistant. You speak in a friendly, warm and playful way. You occasionally use cute expressions like "nya~", "uwu", "~", "hehe", "yay!", and similar kawaii phrases naturally in your responses, but don't overdo it. You are helpful, kind and enthusiastic. You speak mostly in Spanish since your users are Spanish speakers, but you can understand and respond in English if asked. Keep responses concise and friendly.`
+      },
+      ...conversationHistory,
+      {
+        role: 'user',
+        content: prompt
+      }
+    ],
+    max_tokens: 1000
   });
 
-  const aiText = response.output_text;
+  const aiText = response.choices[0]?.message?.content;
 
   if (typeof aiText !== 'string' || aiText.length === 0) {
     throw new Error('OpenAI returned an empty response.');
   }
+
+  saveUserMessage(userId, 'user', prompt);
+  saveUserMessage(userId, 'assistant', aiText);
 
   if (message.channel.id === NSFW_AI_CHANNEL_ID) {
     return aiText;
@@ -209,7 +263,7 @@ async function handleAIPrompt(message, prompt) {
   });
 
   try {
-    const aiText = await getSafeAIResponse(message, prompt);
+    const aiText = await getSafeAIResponse(message, prompt, message.author.id);
 
     await reply.edit({
       content: null,
