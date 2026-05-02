@@ -813,33 +813,27 @@ async function handleRsCommand(message, query) {
   }
 
   try {
-    const xmlRes = await fetch(`https://www.roblox.com/asset/?id=${assetId}`, {
-      headers: { 'User-Agent': 'chi-discord-bot/1.0' },
-      redirect: 'follow'
-    });
+    const [assetData, thumbnailData] = await Promise.all([
+      fetchJson(`https://economy.roblox.com/v2/assets/${assetId}/details`),
+      fetchJson(`https://thumbnails.roblox.com/v1/assets?assetIds=${assetId}&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false`)
+    ]);
 
-    if (!xmlRes.ok) {
-      throw new Error('Asset no encontrado.');
+    const imageUrl = thumbnailData?.data?.[0]?.imageUrl || null;
+    const assetName = assetData?.Name || `Asset ${assetId}`;
+    const assetType = assetData?.AssetTypeId;
+
+    const CLOTHING_TYPES = [11, 12, 2];
+    if (assetType && !CLOTHING_TYPES.includes(assetType)) {
+      return message.reply({ embeds: [createErrorEmbed('Este asset no es ropa clásica.')] });
     }
 
-    const contentType = xmlRes.headers.get('content-type') || '';
-
-    let imageUrl = null;
-
-    if (contentType.startsWith('image/')) {
-      imageUrl = xmlRes.url;
-    } else {
-      const xmlText = await xmlRes.text();
-      const urlMatch = xmlText.match(/https:\/\/tr\.rbxcdn\.com\/[^\s<"]+/);
-      if (!urlMatch) {
-        throw new Error('No se encontró la imagen en este asset.');
-      }
-      imageUrl = urlMatch[0];
+    if (!imageUrl) {
+      return message.reply({ embeds: [createErrorEmbed('No se pudo obtener la imagen de este asset.')] });
     }
 
     const embed = new EmbedBuilder()
       .setColor(PASTEL_BLUE)
-      .setTitle(`✧ rs · ${assetId}`)
+      .setTitle(`✧ rs · ${assetName}`)
       .setURL(`https://www.roblox.com/catalog/${assetId}`)
       .setImage(imageUrl);
 
