@@ -797,6 +797,50 @@ async function handleGroupCommand(message, query) {
   return message.reply({ embeds: [embed] });
 }
 
+async function handleRsCommand(message, query) {
+  try {
+    let assetId = null;
+
+    if (/^\d+$/.test(query)) {
+      assetId = query;
+    } else {
+      const match = query.match(/\/(\d+)/);
+      if (match) {
+        assetId = match[1];
+      }
+    }
+
+    if (!assetId) {
+      return message.reply({ embeds: [createErrorEmbed('No pude encontrar el ID del asset.')] });
+    }
+
+    const res = await fetch(`https://assetdelivery.roblox.com/v1/asset/?id=${assetId}`, {
+      headers: { 'User-Agent': 'chi-discord-bot/1.0' },
+      redirect: 'follow'
+    });
+
+    if (!res.ok) throw new Error('Asset not found');
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) {
+      throw new Error('Este asset no es una imagen.');
+    }
+
+    const imageUrl = res.url;
+    const embed = new EmbedBuilder()
+      .setColor(PASTEL_BLUE)
+      .setTitle(`✧ rs · ${assetId}`)
+      .setURL(`https://www.roblox.com/catalog/${assetId}`)
+      .setImage(imageUrl);
+
+    return message.reply({ embeds: [embed] });
+  } catch (error) {
+    return message.reply({
+      embeds: [createErrorEmbed(error.message || 'Algo salió mal.')]
+    });
+  }
+}
+
 async function execute(message, parsedCommand) {
   const { commandName, args } = parsedCommand;
   const query = args.join(' ').trim();
@@ -844,6 +888,13 @@ async function execute(message, parsedCommand) {
         return message.reply({ embeds: [createErrorEmbed('Debes indicar un nombre o ID de grupo.')] });
       }
       return handleGroupCommand(message, query);
+    }
+
+    if (commandName === 'rs') {
+      if (!query) {
+        return message.reply({ embeds: [createErrorEmbed('Debes indicar un ID o link de asset.')] });
+      }
+      return handleRsCommand(message, query);
     }
 
     return false;
