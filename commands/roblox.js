@@ -816,15 +816,59 @@ async function handleRsCommand(message, query) {
     const assetData = await fetchJson(`https://economy.roblox.com/v2/assets/${assetId}/details`).catch(() => null);
     const assetName = assetData?.Name || `Asset ${assetId}`;
     const downloadUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${assetId}`;
-    const catalogUrl = `https://www.roblox.com/catalog/${assetId}`;
 
     const embed = new EmbedBuilder()
       .setColor(PASTEL_BLUE)
-      .setTitle(`✧ rs · ${assetName}`)
-      .setURL(catalogUrl)
-      .setDescription(`[Haz clic aquí para descargar la plantilla](${downloadUrl})`);
+      .setTitle(assetName)
+      .setURL(`https://www.roblox.com/catalog/${assetId}`)
+      .setDescription(`[Descargar plantilla](${downloadUrl})\n\nResponde a mi mensaje con lo que descargaste.`);
 
-    return message.reply({ embeds: [embed] });
+    const botReply = await message.reply({ embeds: [embed] });
+
+    const filter = response =>
+      response.reference?.messageId === botReply.id &&
+      response.author.id === message.author.id &&
+      response.attachments.size > 0;
+
+    const collected = await message.channel.awaitMessages({
+      filter,
+      max: 1,
+      time: 5 * 60 * 1000
+    });
+
+    if (!collected.size) return;
+
+    const attachment = collected.first().attachments.first();
+    const fileRes = await fetch(attachment.url);
+    if (!fileRes.ok) throw new Error('No pude leer el archivo.');
+
+    const xmlText = await fileRes.text();
+    const innerIdMatch = xmlText.match(/asset\/\?id=(\d+)/);
+
+    if (!innerIdMatch) {
+      return collected.first().reply({ embeds: [createErrorEmbed('No encontré la imagen dentro del archivo.')] });
+    }
+
+    const innerImageId = innerIdMatch[1];
+    const imageUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${innerImageId}`;
+
+    const thumbnailData = await fetchJson(
+      `https://thumbnails.roblox.com/v1/assets?assetIds=${innerImageId}&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false`
+    ).catch(() => null);
+
+    const thumbnailUrl = thumbnailData?.data?.[0]?.imageUrl || null;
+
+    const imageEmbed = new EmbedBuilder()
+      .setColor(PASTEL_BLUE)
+      .setTitle(assetName)
+      .setURL(`https://www.roblox.com/catalog/${assetId}`)
+      .setDescription(`[Descargar imagen](${imageUrl})`);
+
+    if (thumbnailUrl) {
+      imageEmbed.setImage(thumbnailUrl);
+    }
+
+    return collected.first().reply({ embeds: [imageEmbed] });
   } catch (error) {
     return message.reply({ embeds: [createErrorEmbed(error.message || 'No se pudo obtener el asset.')] });
   }
