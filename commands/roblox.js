@@ -1,4 +1,9 @@
-const { EmbedBuilder } = require('discord.js');
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder
+} = require('discord.js');
 
 const PASTEL_BLUE = 0xaeefff;
 const ERROR_RED = 0xff6b6b;
@@ -12,6 +17,10 @@ const ROLIMONS_HEADERS = {
   Referer: 'https://www.rolimons.com/',
   'User-Agent': ROLIMONS_BROWSER_USER_AGENT
 };
+const NAMES_PREV_BUTTON_ID = 'names_prev';
+const NAMES_NEXT_BUTTON_ID = 'names_next';
+const NAMES_BUTTON_TIMEOUT_MS = 2 * 60 * 1000;
+const EMBED_DESCRIPTION_LIMIT = 4096;
 
 let cachedRolimonsItems = null;
 let cachedRolimonsItemsAt = 0;
@@ -80,6 +89,7 @@ async function fetchJson(url, options = {}) {
   if (!response.ok) {
     const message =
       data?.errors?.[0]?.message ||
+      data?.userFacingMessage ||
       data?.message ||
       `La solicitud falló con estado ${response.status}.`;
 
@@ -340,6 +350,65 @@ function calculateRolimonsTotals(playerAssets, itemDetails, inventoryPrivate) {
   return { rap, value };
 }
 
+function buildNamesPages(entries) {
+  const pages = [];
+  let currentPage = '';
+
+  for (const entry of entries) {
+    const nextPage = currentPage ? `${currentPage}\n${entry}` : entry;
+
+    if (nextPage.length > EMBED_DESCRIPTION_LIMIT && currentPage) {
+      pages.push(currentPage);
+      currentPage = entry;
+    } else {
+      currentPage = nextPage;
+    }
+  }
+
+  if (currentPage) {
+    pages.push(currentPage);
+  }
+
+  return pages.length ? pages : [''];
+}
+
+function createNamesButtons(pageIndex, totalPages, disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(NAMES_PREV_BUTTON_ID)
+      .setLabel('◀')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(disabled || pageIndex === 0),
+    new ButtonBuilder()
+      .setCustomId(NAMES_NEXT_BUTTON_ID)
+      .setLabel('▶')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(disabled || pageIndex === totalPages - 1)
+  );
+}
+
+function createNamesPageEmbed(user, profileUrl, pages, pageIndex, totalNames) {
+  return new EmbedBuilder()
+    .setColor(PASTEL_BLUE)
+    .setTitle(`${user.displayName} (@${user.name}) (${totalNames})`)
+    .setURL(profileUrl)
+    .setDescription(pages[pageIndex])
+    .setFooter({ text: `Página ${pageIndex + 1}/${pages.length}` });
+}
+
+function slugifyGroupName(name) {
+  const slug = String(name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+
+  return slug || 'group-name';
+}
+
 async function handleUserCommand(message, query) {
   const user = await resolveRobloxUser(query);
   const userId = user.id;
@@ -557,6 +626,195 @@ async function handleNameCommand(message, query) {
   return message.reply({ embeds: [embed] });
 }
 
+async function handleNamesCommand(message, query) {
+  const user = await resolveRobloxUser(query);
+  const userId = user.id;
+  const profileUrl = getRobloxProfileUrl(userId);
+
+  let names = [];
+
+  try {
+    const data = await fetchJson(
+      `https://users.roblox.com/v1/users/${userId}/username-history?limit=50&sortOrder=Asc`
+    );
+
+    if (Array.isArray(data?.data)) {
+      names = data.data
+        .map(entry => entry?.name)
+        .filter(name => typeof name === 'string' && name.trim().length > 0);
+    }
+  } catch (error) {
+    console.error('No se pudo obtener el historial de nombres:', error);
+  }
+
+  if (names.length === 0) {
+    const embed = new EmbedBuilder()
+      .setColor(PASTEL_BLUE)
+      .setDescription(`El [\`${user.name}\`](${profileUrl}) **no tiene** nombres pasados.`);
+
+    return message.reply({ embeds: [embed] });
+  }
+
+  const entries = names.map((name, index) => `${index + 1}. ${name}`);
+  const pages = buildNamesPages(entries);
+  let currentPage = 0;
+
+  const reply = await message.reply({
+    embeds: [createNamesPageEmbed(user, profileUrl, pages, currentPage, names.length)],
+    components: pages.length > 1 ? [createNamesButtons(currentPage, pages.length)] : []
+  });
+
+  if (pages.length <= 1) {
+    return reply;
+  }
+
+  const collector = reply.createMessageComponentCollector({
+    time: NAMES_BUTTON_TIMEOUT_MS
+  });
+
+  collector.on('collect', async interaction => {
+    if (
+      interaction.customId !== NAMES_PREV_BUTTON_ID &&
+      interaction.customId !== NAMES_NEXT_BUTTON_ID
+    ) {
+      return;
+    }
+
+    if (interaction.user.id !== message.author.id) {
+      await interaction.deferUpdate().catch(() => {});
+      return;
+    }
+
+    if (interaction.customId === NAMES_PREV_BUTTON_ID && currentPage > 0) {
+      currentPage--;
+    }
+
+    if (interaction.customId === NAMES_NEXT_BUTTON_ID && currentPage < pages.length - 1) {
+      currentPage++;
+    }
+
+    await interaction.update({
+      embeds: [createNamesPageEmbed(user, profileUrl, pages, currentPage, names.length)],
+      components: [createNamesButtons(currentPage, pages.length)]
+    });
+  });
+
+  collector.on('end', async () => {
+    await reply.edit({
+      components: [createNamesButtons(currentPage, pages.length, true)]
+    }).catch(() => {});
+  });
+
+  return reply;
+}
+
+async function handleGroupCommand(message, query) {
+  await ensureGuildEmojis(message);
+
+  const trimmedQuery = query.trim();
+  let group = null;
+  let isInappropriate = false;
+
+  if (/^\d+$/.test(trimmedQuery)) {
+    try {
+      group = await fetchJson(`https://groups.roblox.com/v1/groups/${trimmedQuery}`);
+    } catch (error) {
+      console.error('No se pudo obtener el grupo por ID:', error);
+    }
+  } else {
+    let searchData = null;
+    let lookupData = null;
+
+    try {
+      lookupData = await fetchJson(
+        `https://groups.roblox.com/v1/groups/search/lookup?groupName=${encodeURIComponent(trimmedQuery)}`
+      );
+    } catch (error) {
+      if (/not appropriate/i.test(error.message)) {
+        isInappropriate = true;
+      } else {
+        console.error('No se pudo validar el nombre del grupo:', error);
+      }
+    }
+
+    try {
+      searchData = await fetchJson(
+        `https://groups.roblox.com/v1/groups/search?keyword=${encodeURIComponent(
+          trimmedQuery
+        )}&prioritizeExactMatch=true&limit=10`
+      );
+    } catch (error) {
+      if (/not appropriate/i.test(error.message)) {
+        isInappropriate = true;
+      } else {
+        console.error('No se pudo buscar el grupo:', error);
+      }
+    }
+
+    if (isInappropriate) {
+      const emoji = pickRandomEmojiMention(message, WRONG_EMOJI_NAMES);
+      const embed = createEmbed('✧ grupo', `${emoji} El grupo \`${trimmedQuery}\` **es inapropiado**.`);
+      return message.reply({ embeds: [embed] });
+    }
+
+    const groups = Array.isArray(searchData?.data) ? searchData.data : [];
+    const exactMatch = groups.find(
+      entry => typeof entry?.name === 'string' && entry.name.toLowerCase() === trimmedQuery.toLowerCase()
+    );
+    const searchMatch = exactMatch || groups[0] || null;
+    const lookupHasData = Array.isArray(lookupData?.data) && lookupData.data.length > 0;
+
+    if (!searchMatch && !lookupHasData) {
+      const emoji = pickRandomEmojiMention(message, WRONG_EMOJI_NAMES);
+      const embed = createEmbed('✧ grupo', `${emoji} El grupo \`${trimmedQuery}\` **no existe**.`);
+      return message.reply({ embeds: [embed] });
+    }
+
+    if (searchMatch?.id) {
+      try {
+        group = await fetchJson(`https://groups.roblox.com/v1/groups/${searchMatch.id}`);
+      } catch (error) {
+        console.error('No se pudo obtener el grupo completo:', error);
+        group = searchMatch;
+      }
+    }
+  }
+
+  if (!group?.id || !group?.name) {
+    const emoji = pickRandomEmojiMention(message, WRONG_EMOJI_NAMES);
+    const embed = createEmbed('✧ grupo', `${emoji} El grupo \`${trimmedQuery}\` **no existe**.`);
+    return message.reply({ embeds: [embed] });
+  }
+
+  const emoji = pickRandomEmojiMention(message, RIGHT_EMOJI_NAMES);
+  const groupSlug = slugifyGroupName(group.name);
+  const groupUrl = `https://www.roblox.com/groups/${group.id}/${groupSlug}`;
+  const ownerName = group.owner?.username || 'Sin propietario';
+
+  const embed = createEmbed(
+    '✧ grupo',
+    `${emoji} El grupo \`${group.name}\` está **usado**.\n\nRoblox Group → [${group.name}](${groupUrl})`
+  ).addFields(
+    {
+      name: 'Miembros',
+      value: formatNumber(group.memberCount ?? 0),
+      inline: true
+    },
+    {
+      name: 'Propietario',
+      value: ownerName,
+      inline: true
+    },
+    {
+      name: 'Descripción',
+      value: truncateDescription(group.description),
+      inline: false
+    }
+  );
+
+  return message.reply({ embeds: [embed] });
+}
+
 async function execute(message, parsedCommand) {
   const { commandName, args } = parsedCommand;
   const query = args.join(' ').trim();
@@ -590,6 +848,20 @@ async function execute(message, parsedCommand) {
       }
 
       return handleNameCommand(message, query);
+    }
+
+    if (commandName === 'names') {
+      if (!query) {
+        return message.reply({ embeds: [createErrorEmbed('Debes indicar un usuario de Roblox.')] });
+      }
+      return handleNamesCommand(message, query);
+    }
+
+    if (commandName === 'group') {
+      if (!query) {
+        return message.reply({ embeds: [createErrorEmbed('Debes indicar un nombre o ID de grupo.')] });
+      }
+      return handleGroupCommand(message, query);
     }
 
     return false;

@@ -15,7 +15,7 @@ const moderationCommands = {
 };
 
 const CARD_COMMANDS = ['add', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
-const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name'];
+const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group'];
 
 const client = new Client({
   intents: [
