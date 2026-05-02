@@ -36,7 +36,7 @@ function isYouTube(url) {
 }
 
 function isTikTok(url) {
-  return /^https?:\/\/(www\.|vm\.)?tiktok\.com/.test(url);
+  return /^https?:\/\/(www\.|vm\.|vt\.)?tiktok\.com/.test(url);
 }
 
 function isInstagram(url) {
@@ -70,7 +70,11 @@ async function downloadAndSend(messageOrInteraction, url, titleOverride, channel
     try {
       await execPromise('yt-dlp', ytDlpArgs);
     } catch (err) {
-      await reply({ embeds: [errorEmbed('No se pudo descargar el video. Asegúrate de que el link sea válido y público.')] });
+      if (err.message.includes('No video could be found')) {
+        await reply({ embeds: [errorEmbed('No se encontró ningún video en ese tweet. Asegúrate de que el tweet contenga un video.')] });
+      } else {
+        await reply({ embeds: [errorEmbed('No se pudo descargar el video. Asegúrate de que el link sea válido y público.')] });
+      }
       return;
     }
 
