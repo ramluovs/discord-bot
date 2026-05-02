@@ -416,7 +416,8 @@ async function handleTestBirthdayCommand(message) {
 
 async function handleBananaCommand(message) {
   const size = Math.floor(Math.random() * 30) + 1;
-  const displayName = message.member?.displayName || message.author.username;
+  const targetMember = message.mentions.members.first() || message.member;
+  const displayName = targetMember?.displayName || targetMember?.user?.username || message.author.username;
 
   return message.reply({
     content: `La banana de **${displayName}** mide **${size} cm** <:right3:1499652025129111572>`,
