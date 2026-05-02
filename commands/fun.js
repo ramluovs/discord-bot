@@ -516,7 +516,7 @@ async function handleTicTacToeCommand(message, args) {
           const val = board[idx];
           const btn = new ButtonBuilder()
             .setCustomId(`ttt_${idx}`)
-            .setLabel(val || ' ')
+            .setLabel(val || '​')
             .setStyle(val === 'X' ? ButtonStyle.Danger : val === 'O' ? ButtonStyle.Primary : ButtonStyle.Secondary)
             .setDisabled(disabled || val !== null);
           row.addComponents(btn);
