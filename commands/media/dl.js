@@ -7,6 +7,7 @@ const PASTEL_BLUE = 0xaeefff;
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const TEMP_DIR = path.join(__dirname, '../../temp');
 const NSFW_CHANNEL_ID = '1371340983752724561';
+const TWITTER_COOKIES_FILE = path.join(__dirname, '../../cookies/twitter_cookies.txt');
 
 function errorEmbed(description) {
   return new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription(description);
@@ -62,10 +63,14 @@ async function downloadAndSend(messageOrInteraction, url, titleOverride, channel
     const ytDlpArgs = [
       '--no-playlist',
       '--no-part',
-      '-f', 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-      '-o', outputPath,
-      url
+      '-f', 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
     ];
+
+    if (isTwitter(url) && fs.existsSync(TWITTER_COOKIES_FILE)) {
+      ytDlpArgs.push('--cookies', TWITTER_COOKIES_FILE);
+    }
+
+    ytDlpArgs.push('-o', outputPath, url);
 
     try {
       await execPromise('yt-dlp', ytDlpArgs);
