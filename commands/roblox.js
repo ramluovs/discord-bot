@@ -813,23 +813,48 @@ async function handleRsCommand(message, query) {
   }
 
   try {
-    const [assetData, thumbnailData] = await Promise.all([
-      fetchJson(`https://economy.roblox.com/v2/assets/${assetId}/details`),
-      fetchJson(`https://thumbnails.roblox.com/v1/assets?assetIds=${assetId}&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false`)
-    ]);
+    const BROWSER_HEADERS = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+      'Accept': '*/*'
+    };
 
-    const imageUrl = thumbnailData?.data?.[0]?.imageUrl || null;
+    const xmlRes = await fetch(`https://assetdelivery.roblox.com/v1/asset/?id=${assetId}`, {
+      headers: BROWSER_HEADERS,
+      redirect: 'follow'
+    });
+
+    if (!xmlRes.ok) {
+      throw new Error('No se pudo acceder a este asset.');
+    }
+
+    const contentType = xmlRes.headers.get('content-type') || '';
+
+    let imageUrl = null;
+
+    if (contentType.startsWith('image/')) {
+      imageUrl = xmlRes.url;
+    } else {
+      const xmlText = await xmlRes.text();
+      const innerIdMatch = xmlText.match(/asset\/\?id=(\d+)/);
+      if (!innerIdMatch) {
+        throw new Error('No se encontró la imagen en este asset.');
+      }
+      const innerImageId = innerIdMatch[1];
+
+      const imageRes = await fetch(`https://assetdelivery.roblox.com/v1/asset/?id=${innerImageId}`, {
+        headers: BROWSER_HEADERS,
+        redirect: 'follow'
+      });
+
+      if (!imageRes.ok) {
+        throw new Error('No se pudo obtener la imagen del asset.');
+      }
+
+      imageUrl = imageRes.url;
+    }
+
+    const assetData = await fetchJson(`https://economy.roblox.com/v2/assets/${assetId}/details`).catch(() => null);
     const assetName = assetData?.Name || `Asset ${assetId}`;
-    const assetType = assetData?.AssetTypeId;
-
-    const CLOTHING_TYPES = [11, 12, 2];
-    if (assetType && !CLOTHING_TYPES.includes(assetType)) {
-      return message.reply({ embeds: [createErrorEmbed('Este asset no es ropa clásica.')] });
-    }
-
-    if (!imageUrl) {
-      return message.reply({ embeds: [createErrorEmbed('No se pudo obtener la imagen de este asset.')] });
-    }
 
     const embed = new EmbedBuilder()
       .setColor(PASTEL_BLUE)
