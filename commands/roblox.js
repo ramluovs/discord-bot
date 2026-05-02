@@ -1,6 +1,5 @@
 const {
   ActionRowBuilder,
-  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder
@@ -851,21 +850,21 @@ async function handleRsCommand(message, query) {
     }
 
     const innerImageId = innerIdMatch[1];
-    const imageRes = await fetch(`https://assetdelivery.roblox.com/v1/asset/?id=${innerImageId}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
-      },
-      redirect: 'follow'
-    });
+    const imageUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${innerImageId}`;
 
-    if (!imageRes.ok) throw new Error('No se pudo obtener la imagen.');
+    const imageEmbed = new EmbedBuilder()
+      .setColor(PASTEL_BLUE)
+      .setTitle(assetName)
+      .setURL(`https://www.roblox.com/catalog/${assetId}`)
+      .setDescription([
+        `[Descargar imagen](${imageUrl})`,
+        ``,
+        `**PC** → arrastra el archivo a tu navegador para ver la imagen.`,
+        `**iPhone** → compartir → Guardar en Archivos → renombra añadiendo \`.png\` al final.`,
+        `**Android** → abre con cualquier app de galería.`
+      ].join('\n'));
 
-    const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
-    const attachment = new AttachmentBuilder(imageBuffer, { name: `${assetName.replace(/[^a-z0-9]/gi, '_')}.png` });
-
-    return collected.first().reply({
-      files: [attachment]
-    });
+    return collected.first().reply({ embeds: [imageEmbed] });
   } catch (error) {
     return message.reply({ embeds: [createErrorEmbed(error.message || 'No se pudo obtener el asset.')] });
   }
