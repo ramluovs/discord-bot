@@ -5,6 +5,8 @@ const {
 const ask = require('./commands/ask');
 const cards = require('./commands/cards');
 const convert = require('./commands/media/convert');
+const yt = require('./commands/media/yt');
+const dl = require('./commands/media/dl');
 const fun = require('./commands/fun');
 const roblox = require('./commands/roblox');
 const versus = require('./commands/moderation/versus');
@@ -26,7 +28,7 @@ const moderationCommands = {
 
 const CARD_COMMANDS = ['addcard', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
 const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks', 'banana', 'moneda', 'flip', 'coin', 'tictactoe'];
-const MEDIA_COMMANDS = ['c'];
+const MEDIA_COMMANDS = ['c', 'yt', 'dl'];
 const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group', 'rs'];
 
 const client = new Client({
@@ -99,8 +101,16 @@ client.on('messageCreate', async message => {
     return fun.execute(message, parsedCommand);
   }
 
-  if (MEDIA_COMMANDS.includes(parsedCommand.commandName)) {
+  if (parsedCommand.commandName === 'c') {
     return convert.execute(message, parsedCommand);
+  }
+
+  if (parsedCommand.commandName === 'yt') {
+    return yt.execute(message, parsedCommand);
+  }
+
+  if (parsedCommand.commandName === 'dl') {
+    return dl.execute(message, parsedCommand);
   }
 
   if (ROBLOX_COMMANDS.includes(parsedCommand.commandName)) {
