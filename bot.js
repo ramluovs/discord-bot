@@ -14,6 +14,7 @@ const moderationCommands = {
   clear: require('./commands/moderation/clear'),
   setnick: require('./commands/moderation/setnick'),
   verify: require('./commands/moderation/verify'),
+  v: require('./commands/moderation/verify'),
   invite: require('./commands/moderation/invite'),
   invitar: require('./commands/moderation/invite')
 };

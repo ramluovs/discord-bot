@@ -11,7 +11,13 @@ module.exports = {
       });
     }
 
-    const target = message.mentions.members.first();
+    let target = message.mentions.members.first();
+    if (!target && args[0]) {
+      const cleanId = args[0].replace(/[<@!>]/g, '');
+      if (/^\d+$/.test(cleanId)) {
+        target = await message.guild.members.fetch(cleanId).catch(() => null);
+      }
+    }
     if (!target) {
       return message.reply({
         embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('Debes etiquetar a un usuario.')]

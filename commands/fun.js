@@ -420,17 +420,22 @@ async function handleBananaCommand(message) {
   const displayName = targetMember?.displayName || targetMember?.user?.username || message.author.username;
 
   return message.reply({
-    content: `La banana de **${displayName}** mide **${size} cm** <:right3:1499652025129111572>`,
-    files: [{
-      attachment: 'https://cdn.discordapp.com/attachments/1340907464161497168/1500000254379036702/gradient-shaded-quirky-cartoon-banana-png.png?ex=69f6d799&is=69f58619&hm=84442edd898fe988a09c653db408817f772647abf98ae0b2b28a037d98a05777&',
-      name: 'banana.png'
-    }]
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0xFFE135)
+        .setDescription(`La banana de **${displayName}** mide **${size} cm** <:right3:1499652025129111572>`)
+        .setImage('https://cdn.discordapp.com/attachments/1340907464161497168/1500000254379036702/gradient-shaded-quirky-cartoon-banana-png.png?ex=69f6d799&is=69f58619&hm=84442edd898fe988a09c653db408817f772647abf98ae0b2b28a037d98a05777&')
+    ]
   });
 }
 
 async function handleMonedaCommand(message) {
   const flippingMsg = await message.reply({
-    content: 'Lanzando la moneda... <a:coinmariobrosarcade:1500007371420860436>'
+    embeds: [
+      new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription('Lanzando la moneda... <a:coinmariobrosarcade:1500007371420860436>')
+    ]
   });
 
   await new Promise(resolve => setTimeout(resolve, 5000));
@@ -441,7 +446,11 @@ async function handleMonedaCommand(message) {
   const rotations = Math.floor(Math.random() * 8) + 3;
 
   await flippingMsg.edit({
-    content: `La moneda giró a ${speed} km/h, dio ${rotations} vueltas en el aire y cayó en ${resultBold}.`
+    embeds: [
+      new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(`La moneda giró a ${speed} km/h, dio ${rotations} vueltas en el aire y cayó en ${resultBold}.`)
+    ]
   });
 
   const filter = m =>
@@ -456,10 +465,20 @@ async function handleMonedaCommand(message) {
     const newSpeed = Math.floor(Math.random() * 150) + 50;
     const newRotations = Math.floor(Math.random() * 8) + 3;
 
-    const newFlip = await m.reply({ content: 'Lanzando la moneda... <a:coinmariobrosarcade:1500007371420860436>' });
+    const newFlip = await m.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(PASTEL_BLUE)
+          .setDescription('Lanzando la moneda... <a:coinmariobrosarcade:1500007371420860436>')
+      ]
+    });
     await new Promise(resolve => setTimeout(resolve, 5000));
     await newFlip.edit({
-      content: `La moneda giró a ${newSpeed} km/h, dio ${newRotations} vueltas en el aire y cayó en ${newResult}.`
+      embeds: [
+        new EmbedBuilder()
+          .setColor(PASTEL_BLUE)
+          .setDescription(`La moneda giró a ${newSpeed} km/h, dio ${newRotations} vueltas en el aire y cayó en ${newResult}.`)
+      ]
     });
   });
 }

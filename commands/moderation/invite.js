@@ -8,7 +8,7 @@ module.exports = {
         new EmbedBuilder()
           .setColor(PASTEL_BLUE)
           .setTitle('✧ invitación')
-          .setDescription('[Haz clic aquí para invitar a alguien al servidor](https://discord.gg/HuRvGPKKtr)')
+          .setDescription('[Link de invitación](https://discord.gg/HuRvGPKKtr)')
       ]
     });
   }
