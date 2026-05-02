@@ -798,35 +798,45 @@ async function handleGroupCommand(message, query) {
 }
 
 async function handleRsCommand(message, query) {
+  const trimmedQuery = query.trim();
+
+  let assetId = null;
+  if (/^\d+$/.test(trimmedQuery)) {
+    assetId = trimmedQuery;
+  } else {
+    const match = trimmedQuery.match(/\/(\d+)/);
+    if (match) assetId = match[1];
+  }
+
+  if (!assetId) {
+    return message.reply({ embeds: [createErrorEmbed('No pude encontrar el ID del asset.')] });
+  }
+
   try {
-    let assetId = null;
-
-    if (/^\d+$/.test(query)) {
-      assetId = query;
-    } else {
-      const match = query.match(/\/(\d+)/);
-      if (match) {
-        assetId = match[1];
-      }
-    }
-
-    if (!assetId) {
-      return message.reply({ embeds: [createErrorEmbed('No pude encontrar el ID del asset.')] });
-    }
-
-    const res = await fetch(`https://assetdelivery.roblox.com/v1/asset/?id=${assetId}`, {
+    const xmlRes = await fetch(`https://www.roblox.com/asset/?id=${assetId}`, {
       headers: { 'User-Agent': 'chi-discord-bot/1.0' },
       redirect: 'follow'
     });
 
-    if (!res.ok) throw new Error('Asset not found');
-
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.startsWith('image/')) {
-      throw new Error('Este asset no es una imagen.');
+    if (!xmlRes.ok) {
+      throw new Error('Asset no encontrado.');
     }
 
-    const imageUrl = res.url;
+    const contentType = xmlRes.headers.get('content-type') || '';
+
+    let imageUrl = null;
+
+    if (contentType.startsWith('image/')) {
+      imageUrl = xmlRes.url;
+    } else {
+      const xmlText = await xmlRes.text();
+      const urlMatch = xmlText.match(/https:\/\/tr\.rbxcdn\.com\/[^\s<"]+/);
+      if (!urlMatch) {
+        throw new Error('No se encontró la imagen en este asset.');
+      }
+      imageUrl = urlMatch[0];
+    }
+
     const embed = new EmbedBuilder()
       .setColor(PASTEL_BLUE)
       .setTitle(`✧ rs · ${assetId}`)
@@ -835,9 +845,7 @@ async function handleRsCommand(message, query) {
 
     return message.reply({ embeds: [embed] });
   } catch (error) {
-    return message.reply({
-      embeds: [createErrorEmbed(error.message || 'Algo salió mal.')]
-    });
+    return message.reply({ embeds: [createErrorEmbed(error.message || 'No se pudo obtener el asset.')] });
   }
 }
 
