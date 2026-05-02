@@ -200,11 +200,14 @@ async function handleVersusDelete(message, args) {
 }
 
 module.exports = {
-  async execute(message, parsedCommand) {
-    const { commandName, args } = parsedCommand;
-    if (commandName === 'versus') return handleVersus(message);
-    if (commandName === 'versusadd') return handleVersusAdd(message, args);
-    if (commandName === 'versusdelete') return handleVersusDelete(message, args);
+  async execute(message, second) {
+    const commandName = Array.isArray(second) ? null : second?.commandName;
+    const args = Array.isArray(second) ? second : (second?.args || []);
+    const cmd = commandName || 'versus';
+
+    if (cmd === 'versus') return handleVersus(message);
+    if (cmd === 'versusadd') return handleVersusAdd(message, args);
+    if (cmd === 'versusdelete') return handleVersusDelete(message, args);
     return false;
   }
 };
