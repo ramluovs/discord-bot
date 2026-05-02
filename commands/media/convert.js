@@ -155,9 +155,10 @@ async function handleConvert(message, args) {
       const maxSeconds = isTT ? TIKTOK_MAX_SECONDS : YOUTUBE_MAX_SECONDS;
       const maxLabel = isTT ? '3 minutos' : '5 minutos';
 
-      inputPath = path.join(TEMP_DIR, `input_${timestamp}.%(ext)s`);
       const ytDlpOutput = path.join(TEMP_DIR, `input_${timestamp}.mp3`);
+      inputPath = ytDlpOutput;
       downloadedInput = ytDlpOutput;
+      outputPath = ytDlpOutput;
 
       try {
         await execPromise('yt-dlp', [
@@ -166,6 +167,7 @@ async function handleConvert(message, args) {
           '-x',
           '--audio-format', 'mp3',
           '--audio-quality', '2',
+          '--no-part',
           '-o', ytDlpOutput,
           link
         ]);
@@ -181,7 +183,7 @@ async function handleConvert(message, args) {
       outputPath = ytDlpOutput;
     }
 
-    if (inputPath && inputPath !== outputPath) {
+    if (inputPath && inputPath !== outputPath && fs.existsSync(inputPath)) {
       await convertToMp3(inputPath, outputPath);
     }
 
