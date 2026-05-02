@@ -1,5 +1,6 @@
 const {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder
@@ -838,8 +839,8 @@ async function handleRsCommand(message, query) {
 
     if (!collected.size) return;
 
-    const attachment = collected.first().attachments.first();
-    const fileRes = await fetch(attachment.url);
+    const uploadedAttachment = collected.first().attachments.first();
+    const fileRes = await fetch(uploadedAttachment.url);
     if (!fileRes.ok) throw new Error('No pude leer el archivo.');
 
     const xmlText = await fileRes.text();
@@ -850,25 +851,21 @@ async function handleRsCommand(message, query) {
     }
 
     const innerImageId = innerIdMatch[1];
-    const imageUrl = `https://assetdelivery.roblox.com/v1/asset/?id=${innerImageId}`;
+    const imageRes = await fetch(`https://assetdelivery.roblox.com/v1/asset/?id=${innerImageId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
+      },
+      redirect: 'follow'
+    });
 
-    const thumbnailData = await fetchJson(
-      `https://thumbnails.roblox.com/v1/assets?assetIds=${innerImageId}&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false`
-    ).catch(() => null);
+    if (!imageRes.ok) throw new Error('No se pudo obtener la imagen.');
 
-    const thumbnailUrl = thumbnailData?.data?.[0]?.imageUrl || null;
+    const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
+    const attachment = new AttachmentBuilder(imageBuffer, { name: `${assetName.replace(/[^a-z0-9]/gi, '_')}.png` });
 
-    const imageEmbed = new EmbedBuilder()
-      .setColor(PASTEL_BLUE)
-      .setTitle(assetName)
-      .setURL(`https://www.roblox.com/catalog/${assetId}`)
-      .setDescription(`[Descargar imagen](${imageUrl})`);
-
-    if (thumbnailUrl) {
-      imageEmbed.setImage(thumbnailUrl);
-    }
-
-    return collected.first().reply({ embeds: [imageEmbed] });
+    return collected.first().reply({
+      files: [attachment]
+    });
   } catch (error) {
     return message.reply({ embeds: [createErrorEmbed(error.message || 'No se pudo obtener el asset.')] });
   }
