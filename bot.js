@@ -4,6 +4,7 @@ const {
 } = require('discord.js');
 const ask = require('./commands/ask');
 const cards = require('./commands/cards');
+const fun = require('./commands/fun');
 const roblox = require('./commands/roblox');
 const moderationCommands = {
   ban: require('./commands/moderation/ban'),
@@ -15,6 +16,7 @@ const moderationCommands = {
 };
 
 const CARD_COMMANDS = ['add', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
+const FUN_COMMANDS = ['birthday', 'testbirthday'];
 const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group', 'rs'];
 
 const client = new Client({
@@ -52,6 +54,7 @@ function parsePrefixedCommand(content) {
 // ===== READY =====
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
+  fun.scheduleBirthdayCheck(client);
 });
 
 // ===== MESSAGE HANDLER =====
@@ -80,6 +83,10 @@ client.on('messageCreate', async message => {
 
   if (CARD_COMMANDS.includes(parsedCommand.commandName)) {
     return cards.execute(message, parsedCommand);
+  }
+
+  if (FUN_COMMANDS.includes(parsedCommand.commandName)) {
+    return fun.execute(message, parsedCommand);
   }
 
   if (ROBLOX_COMMANDS.includes(parsedCommand.commandName)) {
