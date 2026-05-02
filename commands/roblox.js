@@ -774,12 +774,12 @@ async function handleGroupCommand(message, query) {
   const ownerName = group.owner?.username || 'Sin propietario';
   const groupId = group.id;
 
-  const [groupIconData, groupImageData] = await Promise.all([
+  const [groupIconData, groupBannerData] = await Promise.all([
     fetchJson(`https://thumbnails.roblox.com/v1/groups/icons?groupIds=${groupId}&size=150x150&format=Png&isCircular=false`).catch(() => null),
-    fetchJson(`https://thumbnails.roblox.com/v1/groups/icons?groupIds=${groupId}&size=420x420&format=Png&isCircular=false`).catch(() => null)
+    fetchJson(`https://thumbnails.roblox.com/v1/groups/emblem?groupIds=${groupId}&size=1200x480&format=Png&isCircular=false`).catch(() => null)
   ]);
   const groupIconUrl = groupIconData?.data?.[0]?.imageUrl || null;
-  const groupImageUrl = groupImageData?.data?.[0]?.imageUrl || null;
+  const groupBannerUrl = groupBannerData?.data?.[0]?.imageUrl || null;
 
   const embed = createEmbed(
     '✧ grupo',
@@ -803,7 +803,7 @@ async function handleGroupCommand(message, query) {
   );
 
   if (groupIconUrl) embed.setThumbnail(groupIconUrl);
-  if (groupImageUrl) embed.setImage(groupImageUrl);
+  if (groupBannerUrl) embed.setImage(groupBannerUrl);
 
   return message.reply({ embeds: [embed] });
 }
