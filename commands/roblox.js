@@ -772,6 +772,14 @@ async function handleGroupCommand(message, query) {
   const groupSlug = slugifyGroupName(group.name);
   const groupUrl = `https://www.roblox.com/groups/${group.id}/${groupSlug}`;
   const ownerName = group.owner?.username || 'Sin propietario';
+  const groupId = group.id;
+
+  const [groupIconData, groupImageData] = await Promise.all([
+    fetchJson(`https://thumbnails.roblox.com/v1/groups/icons?groupIds=${groupId}&size=150x150&format=Png&isCircular=false`).catch(() => null),
+    fetchJson(`https://thumbnails.roblox.com/v1/groups/icons?groupIds=${groupId}&size=420x420&format=Png&isCircular=false`).catch(() => null)
+  ]);
+  const groupIconUrl = groupIconData?.data?.[0]?.imageUrl || null;
+  const groupImageUrl = groupImageData?.data?.[0]?.imageUrl || null;
 
   const embed = createEmbed(
     '✧ grupo',
@@ -793,6 +801,9 @@ async function handleGroupCommand(message, query) {
       inline: false
     }
   );
+
+  if (groupIconUrl) embed.setThumbnail(groupIconUrl);
+  if (groupImageUrl) embed.setImage(groupImageUrl);
 
   return message.reply({ embeds: [embed] });
 }
