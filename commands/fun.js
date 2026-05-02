@@ -239,14 +239,15 @@ function scheduleBirthdayCheck(client) {
   }, msUntilMidnight);
 }
 
-function buildLinksEmbed(page) {
+function buildLinksEmbed(page, expiresAt) {
   const description = [
     page.entries.map(entry => {
       const entryLine = `[♡- ${entry.name}](${entry.link})`;
       return entry.id ? `${entryLine}\n-# ID: ${entry.id}` : entryLine;
     }).join('\n\n'),
     '',
-    '-# Si quieres el link directo de alguno, responde a mi mensaje con el nombre.'
+    '-# Si quieres el link directo de alguno, responde a mi mensaje con el nombre.',
+    `-# Este mensaje vence a las <t:${expiresAt}:T>`
   ].join('\n');
 
   return new EmbedBuilder()
@@ -416,6 +417,7 @@ async function handleTestBirthdayCommand(message) {
 
 async function handleLinksCommand(message) {
   const linksData = loadLinks();
+  const expiresAt = Math.floor((Date.now() + 3 * 60 * 1000) / 1000);
 
   if (!linksData.pages?.length) {
     return message.reply({
@@ -427,7 +429,7 @@ async function handleLinksCommand(message) {
   const totalPages = linksData.pages.length;
 
   const buildState = (disabled = false) => ({
-    embeds: [buildLinksEmbed(linksData.pages[currentPage])],
+    embeds: [buildLinksEmbed(linksData.pages[currentPage], expiresAt)],
     components: [buildLinksButtons(currentPage, totalPages, disabled)]
   });
 
@@ -436,7 +438,7 @@ async function handleLinksCommand(message) {
   const buttonFilter = interaction => interaction.user.id === message.author.id;
   const buttonCollector = botReply.createMessageComponentCollector({
     filter: buttonFilter,
-    time: 5 * 60 * 1000
+    time: 3 * 60 * 1000
   });
 
   buttonCollector.on('collect', async interaction => {
@@ -461,8 +463,7 @@ async function handleLinksCommand(message) {
 
   const replyCollector = message.channel.createMessageCollector({
     filter: replyFilter,
-    max: 1,
-    time: 2 * 60 * 1000
+    time: 3 * 60 * 1000
   });
 
   replyCollector.on('collect', async response => {
