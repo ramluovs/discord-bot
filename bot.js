@@ -16,7 +16,7 @@ const moderationCommands = {
 };
 
 const CARD_COMMANDS = ['add', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
-const FUN_COMMANDS = ['birthday', 'testbirthday'];
+const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks'];
 const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group', 'rs'];
 
 const client = new Client({
