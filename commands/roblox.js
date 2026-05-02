@@ -352,21 +352,9 @@ function calculateRolimonsTotals(playerAssets, itemDetails, inventoryPrivate) {
 
 function buildNamesPages(entries) {
   const pages = [];
-  let currentPage = '';
-
-  for (const entry of entries) {
-    const nextPage = currentPage ? `${currentPage}\n${entry}` : entry;
-
-    if (nextPage.length > EMBED_DESCRIPTION_LIMIT && currentPage) {
-      pages.push(currentPage);
-      currentPage = entry;
-    } else {
-      currentPage = nextPage;
-    }
-  }
-
-  if (currentPage) {
-    pages.push(currentPage);
+  
+  for (let index = 0; index < entries.length; index += 15) {
+    pages.push(entries.slice(index, index + 15).join('\n'));
   }
 
   return pages.length ? pages : [''];
@@ -631,21 +619,15 @@ async function handleNamesCommand(message, query) {
   const userId = user.id;
   const profileUrl = getRobloxProfileUrl(userId);
 
-  let names = [];
-
+  let historyData = null;
   try {
-    const data = await fetchJson(
+    historyData = await fetchJson(
       `https://users.roblox.com/v1/users/${userId}/username-history?limit=50&sortOrder=Asc`
     );
-
-    if (Array.isArray(data?.data)) {
-      names = data.data
-        .map(entry => entry?.name)
-        .filter(name => typeof name === 'string' && name.trim().length > 0);
-    }
-  } catch (error) {
-    console.error('No se pudo obtener el historial de nombres:', error);
+  } catch {
+    historyData = null;
   }
+  const names = historyData?.data?.map(entry => entry.name) || [];
 
   if (names.length === 0) {
     const embed = new EmbedBuilder()
