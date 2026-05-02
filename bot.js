@@ -7,6 +7,7 @@ const cards = require('./commands/cards');
 const convert = require('./commands/media/convert');
 const yt = require('./commands/media/yt');
 const dl = require('./commands/media/dl');
+const ig = require('./commands/media/ig');
 const fun = require('./commands/fun');
 const roblox = require('./commands/roblox');
 const versus = require('./commands/moderation/versus');
@@ -111,6 +112,10 @@ client.on('messageCreate', async message => {
 
   if (parsedCommand.commandName === 'dl') {
     return dl.execute(message, parsedCommand);
+  }
+
+  if (parsedCommand.commandName === 'ig') {
+    return ig.execute(message, parsedCommand);
   }
 
   if (ROBLOX_COMMANDS.includes(parsedCommand.commandName)) {
