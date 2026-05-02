@@ -246,8 +246,7 @@ function buildLinksEmbed(page, expiresAt) {
       return entry.id ? `${entryLine}\n-# ID: ${entry.id}` : entryLine;
     }).join('\n\n'),
     '',
-    '-# Si quieres el link directo de alguno, responde a mi mensaje con el nombre.',
-    `-# Este mensaje vence a las <t:${expiresAt}:T>`
+    `-# Si quieres el link directo de alguno, responde a mi mensaje con el nombre. Este mensaje vence a las <t:${expiresAt}:T>`
   ].join('\n');
 
   return new EmbedBuilder()
