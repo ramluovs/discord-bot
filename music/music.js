@@ -4,6 +4,7 @@ const path = require('path');
 
 const PASTEL_BLUE = 0xaeefff;
 const MUSIC_STORAGE_CHANNEL_ID = '1500358512780251288';
+const MUSIC_COVERS_CHANNEL_ID = '1500367140174430309';
 const DEFAULT_COVER = 'https://cdn.discordapp.com/attachments/1340867275351261335/1500357575466684496/IMG_0754.jpg?ex=69f82461&is=69f6d2e1&hm=5bc8260d3d97b16b754990441a63aa90376343b9c982c981ed496f1f0c3727f5&';
 const MUSIC_DATA_FILE = path.join(__dirname, '../data/music_data.json');
 const PAGE_SIZE = 50;
@@ -257,8 +258,32 @@ async function handleAddMusicImage(message, args) {
     });
   }
 
-  const hasCustomCover = song.coverUrl !== DEFAULT_COVER;
+  const coversChannel = await message.client.channels.fetch(MUSIC_COVERS_CHANNEL_ID).catch(() => null);
+  if (!coversChannel || !coversChannel.isTextBased()) {
+    return message.reply({
+      embeds: [errorEmbed('No se pudo acceder al canal de imágenes.')]
+    });
+  }
 
+  const coverMsg = await coversChannel.send({
+    content: `cover:${messageId}`,
+    files: [{ attachment: attachment.url, name: attachment.name }]
+  }).catch(() => null);
+
+  if (!coverMsg) {
+    return message.reply({
+      embeds: [errorEmbed('No se pudo subir la imagen. Intenta de nuevo.')]
+    });
+  }
+
+  const permanentCoverUrl = coverMsg.attachments.first()?.url;
+  if (!permanentCoverUrl) {
+    return message.reply({
+      embeds: [errorEmbed('No se pudo obtener la URL de la imagen.')]
+    });
+  }
+
+  const hasCustomCover = song.coverUrl !== DEFAULT_COVER;
   const confirmText = hasCustomCover
     ? `**${song.name}** ya tiene una imagen. ¿Quieres reemplazarla?`
     : `¿Agregar esta imagen a **${song.name}**?`;
@@ -273,7 +298,7 @@ async function handleAddMusicImage(message, args) {
       .setColor(PASTEL_BLUE)
       .setTitle('✧ addmusicimage')
       .setDescription(confirmText)
-      .setThumbnail(attachment.url)
+      .setThumbnail(permanentCoverUrl)
     ],
     components: [row]
   });
@@ -283,13 +308,14 @@ async function handleAddMusicImage(message, args) {
 
   collector.on('collect', async interaction => {
     if (interaction.customId === 'mimg_no') {
+      await coverMsg.delete().catch(() => {});
       return interaction.update({
         embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('✧ addmusicimage').setDescription('Cancelado.')],
         components: []
       });
     }
 
-    data.songs[messageId].coverUrl = attachment.url;
+    data.songs[messageId].coverUrl = permanentCoverUrl;
     saveMusicData(data);
 
     return interaction.update({
@@ -297,14 +323,17 @@ async function handleAddMusicImage(message, args) {
         .setColor(PASTEL_BLUE)
         .setTitle('✧ addmusicimage')
         .setDescription(`Imagen actualizada para **${song.name}**.`)
-        .setThumbnail(attachment.url)
+        .setThumbnail(permanentCoverUrl)
       ],
       components: []
     });
   });
 
   collector.on('end', collected => {
-    if (!collected.size) confirmMsg.edit({ components: [] }).catch(() => {});
+    if (!collected.size) {
+      coverMsg.delete().catch(() => {});
+      confirmMsg.edit({ components: [] }).catch(() => {});
+    }
   });
 }
 
