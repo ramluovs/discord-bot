@@ -1,4 +1,5 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { handleMusicTrack, handleMusicUntrack, handleMusicTrackList } = require('./tracking');
 const fs = require('fs');
 const path = require('path');
 
@@ -344,6 +345,9 @@ module.exports = {
     if (commandName === 'musicdelete') return handleMusicDelete(message, args);
     if (commandName === 'musiclist') return handleMusicList(message);
     if (commandName === 'addmusicimage') return handleAddMusicImage(message, args);
+    if (commandName === 'musictrack') return handleMusicTrack(message, args);
+    if (commandName === 'musicuntrack') return handleMusicUntrack(message, args);
+    if (commandName === 'musictracklist') return handleMusicTrackList(message);
     return false;
   }
 };

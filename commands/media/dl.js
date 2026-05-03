@@ -55,7 +55,7 @@ function isSpotify(url) {
 }
 
 function isSoundCloud(url) {
-  return /^https?:\/\/(www\.)?soundcloud\.com\//.test(url);
+  return /^https?:\/\/(www\.)?soundcloud\.com/.test(url);
 }
 
 async function getSpotifyToken() {
@@ -104,9 +104,17 @@ async function downloadAndSend(messageOrInteraction, url, titleOverride, channel
     ];
 
     if (isSoundCloud(url)) {
-      ytDlpArgs.push('-x', '--audio-format', 'mp3', '--audio-quality', '2', '--no-part');
+      ytDlpArgs.push(
+        '-x',
+        '--audio-format', 'mp3',
+        '--audio-quality', '2',
+        '--no-part'
+      );
     } else {
-      ytDlpArgs.push('-f', 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', '--no-part');
+      ytDlpArgs.push(
+        '--no-part',
+        '-f', 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+      );
     }
 
     if (isTwitter(url) && fs.existsSync(TWITTER_COOKIES_FILE)) {
@@ -182,18 +190,17 @@ async function handleDl(message, args) {
         .setTitle('✧ spotify')
         .setDescription([
           `**${info.name}** — ${info.artist}`,
-          '',
-          'Usa este comando para descargarla:',
-          '```',
-          `;yt ${searchQuery}`,
-          '```'
+          ``,
+          `Usa este comando para descargarla:`,
+          `\`;yt ${searchQuery}\``,
+          `\`\`\`;yt ${searchQuery}\`\`\``
         ].join('\n'))
       ]
     });
   }
 
-  if (!isYouTube(url) && !isTikTok(url) && !isInstagram(url) && !isTwitter(url) && !isSoundCloud(url)) {
-    return message.reply({ embeds: [errorEmbed('Solo se aceptan links de YouTube, TikTok, Instagram, Twitter/X, Spotify o SoundCloud.')] });
+  if (!isYouTube(url) && !isTikTok(url) && !isInstagram(url) && !isTwitter(url)) {
+    return message.reply({ embeds: [errorEmbed('Solo se aceptan links de YouTube, TikTok, Instagram, Twitter/X o Spotify.')] });
   }
 
   const thinking = await message.reply({ embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setDescription('Descargando video...')] });

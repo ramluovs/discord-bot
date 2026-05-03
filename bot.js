@@ -31,7 +31,7 @@ const moderationCommands = {
 const CARD_COMMANDS = ['addcard', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
 const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks', 'banana', 'moneda', 'flip', 'coin', 'tictactoe'];
 const MEDIA_COMMANDS = ['c', 'yt', 'dl'];
-const MUSIC_COMMANDS = ['musicadd', 'musicdelete', 'musiclist', 'addmusicimage'];
+const MUSIC_COMMANDS = ['musicadd', 'musicdelete', 'musiclist', 'addmusicimage', 'musictrack', 'musicuntrack', 'musictracklist'];
 const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group', 'rs'];
 
 const client = new Client({
@@ -70,6 +70,8 @@ function parsePrefixedCommand(content) {
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
   fun.scheduleBirthdayCheck(client);
+  const { scheduleTracking } = require('./music/tracking');
+  scheduleTracking(client);
 });
 
 // ===== MESSAGE HANDLER =====
