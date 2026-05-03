@@ -2,6 +2,10 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const { handleMusicTrack, handleMusicUntrack, handleMusicTrackList } = require('./tracking');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
+const os = require('os');
+const pathLib = require('path');
+const fsLib = require('fs');
 
 const PASTEL_BLUE = 0xaeefff;
 const MUSIC_STORAGE_CHANNEL_ID = '1500358512780251288';
@@ -338,6 +342,70 @@ async function handleAddMusicImage(message, args) {
   });
 }
 
+async function handleAppDownloadRequest(message) {
+  const content = message.content.trim();
+  const match = content.match(/^DOWNLOAD_REQUEST:(.+)\|NAME:(.+)\|AUTHOR:(.+)$/);
+  if (!match) return;
+
+  const url = match[1].trim();
+  const name = match[2].trim();
+  const author = match[3].trim();
+
+  const isYouTube = /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)/.test(url);
+  const isSoundCloud = /^https?:\/\/(www\.)?soundcloud\.com\//.test(url);
+
+  if (!isYouTube && !isSoundCloud) return;
+
+  const outputPath = pathLib.join(os.tmpdir(), `app_dl_${Date.now()}.mp3`);
+
+  try {
+    await new Promise((resolve, reject) => {
+      execFile('yt-dlp', [
+        '--no-playlist',
+        '--no-part',
+        '-x',
+        '--audio-format', 'mp3',
+        '--audio-quality', '2',
+        '-o', outputPath,
+        url
+      ], { timeout: 120000 }, (error, stdout, stderr) => {
+        if (error) reject(new Error(stderr || error.message));
+        else resolve(stdout);
+      });
+    });
+
+    const storageChannel = await message.client.channels.fetch(MUSIC_STORAGE_CHANNEL_ID);
+    if (!storageChannel || !storageChannel.isTextBased()) throw new Error('Storage channel unavailable');
+
+    const storageMessage = await storageChannel.send({
+      content: `**${name}** — ${author}`,
+      files: [{ attachment: outputPath, name: `${name}.mp3` }]
+    });
+
+    const audioUrl = storageMessage.attachments.first()?.url;
+
+    const data = loadMusicData();
+    data.songs[storageMessage.id] = {
+      messageId: storageMessage.id,
+      name,
+      author,
+      audioUrl,
+      coverUrl: DEFAULT_COVER,
+      addedAt: Date.now()
+    };
+    saveMusicData(data);
+
+    await message.delete().catch(() => {});
+
+    try { fsLib.unlinkSync(outputPath); } catch {}
+
+  } catch (err) {
+    console.error('App download request failed:', err);
+    await message.delete().catch(() => {});
+    try { fsLib.unlinkSync(outputPath); } catch {}
+  }
+}
+
 module.exports = {
   async execute(message, parsedCommand) {
     const { commandName, args } = parsedCommand;
@@ -349,5 +417,6 @@ module.exports = {
     if (commandName === 'musicuntrack') return handleMusicUntrack(message, args);
     if (commandName === 'musictracklist') return handleMusicTrackList(message);
     return false;
-  }
+  },
+  handleAppDownloadRequest
 };

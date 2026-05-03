@@ -78,6 +78,12 @@ client.once('ready', () => {
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
+  if (message.channel.id === '1500627966713925832' && !message.author.bot) {
+    const { handleAppDownloadRequest } = require('./music/music');
+    handleAppDownloadRequest(message);
+    return;
+  }
+
   const isReply = Boolean(message.reference?.messageId);
   const parsedCommand = parsePrefixedCommand(message.content);
 
