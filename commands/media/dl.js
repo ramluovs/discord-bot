@@ -87,10 +87,10 @@ async function getSpotifyTrackInfo(url) {
   return { name: data.name, artist: artists };
 }
 
-async function downloadAndSend(messageOrInteraction, url, titleOverride, channel, isNsfwChannel) {
+async function downloadAndSend(messageOrInteraction, url, titleOverride, channel, isNsfwChannel, asMp3 = false) {
   ensureTempDir();
   const timestamp = Date.now();
-  const outputPath = path.join(TEMP_DIR, `dl_${timestamp}.${isSoundCloud(url) ? 'mp3' : 'mp4'}`);
+  const outputPath = path.join(TEMP_DIR, `dl_${timestamp}.${(asMp3 || isSoundCloud(url)) ? 'mp3' : 'mp4'}`);
   const isInteraction = !!messageOrInteraction.deferReply;
 
   const reply = async opts => {
@@ -103,19 +103,12 @@ async function downloadAndSend(messageOrInteraction, url, titleOverride, channel
       '--no-playlist'
     ];
 
-    if (isSoundCloud(url)) {
-      ytDlpArgs.push(
-        '-x',
-        '--audio-format', 'mp3',
-        '--audio-quality', '2',
-        '--no-part'
-      );
+    if (asMp3 || isSoundCloud(url)) {
+      ytDlpArgs.push('-x', '--audio-format', 'mp3', '--audio-quality', '2');
     } else {
-      ytDlpArgs.push(
-        '--no-part',
-        '-f', 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-      );
+      ytDlpArgs.push('-f', 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best');
     }
+    ytDlpArgs.push('--no-part');
 
     if (isTwitter(url) && fs.existsSync(TWITTER_COOKIES_FILE)) {
       ytDlpArgs.push('--cookies', TWITTER_COOKIES_FILE);
@@ -150,7 +143,7 @@ async function downloadAndSend(messageOrInteraction, url, titleOverride, channel
     const safeTitle = title.replace(/[^a-z0-9]/gi, '_').slice(0, 50);
 
     await reply({
-      files: [{ attachment: outputPath, name: `${safeTitle}.${isSoundCloud(url) ? 'mp3' : 'mp4'}` }]
+      files: [{ attachment: outputPath, name: `${safeTitle}.${(asMp3 || isSoundCloud(url)) ? 'mp3' : 'mp4'}` }]
     });
   } catch (e) {
     console.error('dl error:', e);

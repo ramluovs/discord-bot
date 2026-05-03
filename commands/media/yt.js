@@ -56,9 +56,14 @@ function buildButtons(index, total, disabled = false) {
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(disabled || index === total - 1),
     new ButtonBuilder()
-      .setCustomId('yt_dl')
-      .setLabel('⬇ descargar')
+      .setCustomId('yt_dl_mp4')
+      .setLabel('⬇ Descargar (.mp4)')
       .setStyle(ButtonStyle.Primary)
+      .setDisabled(disabled),
+    new ButtonBuilder()
+      .setCustomId('yt_dl_mp3')
+      .setLabel('⬇ Descargar (.mp3)')
+      .setStyle(ButtonStyle.Success)
       .setDisabled(disabled)
   );
 }
@@ -123,7 +128,7 @@ async function handleYt(message, args) {
 
   const expiresAt = Math.floor((Date.now() + 3 * 60 * 1000) / 1000);
   const collector = thinking.createMessageComponentCollector({
-    filter: i => ['yt_prev', 'yt_next', 'yt_dl'].includes(i.customId),
+    filter: i => ['yt_prev', 'yt_next', 'yt_dl_mp4', 'yt_dl_mp3'].includes(i.customId),
     time: 3 * 60 * 1000
   });
 
@@ -132,12 +137,13 @@ async function handleYt(message, args) {
       if (interaction.customId === 'yt_prev' && index > 0) index--;
       if (interaction.customId === 'yt_next' && index < videos.length - 1) index++;
 
-      if (interaction.customId === 'yt_dl') {
+      if (interaction.customId === 'yt_dl_mp4' || interaction.customId === 'yt_dl_mp3') {
         await interaction.deferReply();
         const video = currentVideo();
         const url = `https://www.youtube.com/watch?v=${video.id}`;
         const dl = require('./dl');
-        return dl.downloadAndSend(interaction, url, video.title, message.channel, isNsfwChannel);
+        const asMp3 = interaction.customId === 'yt_dl_mp3';
+        return dl.downloadAndSend(interaction, url, video.title, message.channel, isNsfwChannel, asMp3);
       }
 
       const video = currentVideo();
