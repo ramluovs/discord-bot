@@ -54,6 +54,10 @@ function isSpotify(url) {
   return /^https?:\/\/(open\.)?spotify\.com\/track\//.test(url);
 }
 
+function isSoundCloud(url) {
+  return /^https?:\/\/(www\.)?soundcloud\.com\//.test(url);
+}
+
 async function getSpotifyToken() {
   const credentials = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
   const res = await fetch('https://accounts.spotify.com/api/token', {
@@ -86,7 +90,7 @@ async function getSpotifyTrackInfo(url) {
 async function downloadAndSend(messageOrInteraction, url, titleOverride, channel, isNsfwChannel) {
   ensureTempDir();
   const timestamp = Date.now();
-  const outputPath = path.join(TEMP_DIR, `dl_${timestamp}.mp4`);
+  const outputPath = path.join(TEMP_DIR, `dl_${timestamp}.${isSoundCloud(url) ? 'mp3' : 'mp4'}`);
   const isInteraction = !!messageOrInteraction.deferReply;
 
   const reply = async opts => {
@@ -96,10 +100,14 @@ async function downloadAndSend(messageOrInteraction, url, titleOverride, channel
 
   try {
     const ytDlpArgs = [
-      '--no-playlist',
-      '--no-part',
-      '-f', 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+      '--no-playlist'
     ];
+
+    if (isSoundCloud(url)) {
+      ytDlpArgs.push('-x', '--audio-format', 'mp3', '--audio-quality', '2', '--no-part');
+    } else {
+      ytDlpArgs.push('-f', 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', '--no-part');
+    }
 
     if (isTwitter(url) && fs.existsSync(TWITTER_COOKIES_FILE)) {
       ytDlpArgs.push('--cookies', TWITTER_COOKIES_FILE);
@@ -134,7 +142,7 @@ async function downloadAndSend(messageOrInteraction, url, titleOverride, channel
     const safeTitle = title.replace(/[^a-z0-9]/gi, '_').slice(0, 50);
 
     await reply({
-      files: [{ attachment: outputPath, name: `${safeTitle}.mp4` }]
+      files: [{ attachment: outputPath, name: `${safeTitle}.${isSoundCloud(url) ? 'mp3' : 'mp4'}` }]
     });
   } catch (e) {
     console.error('dl error:', e);
@@ -184,8 +192,8 @@ async function handleDl(message, args) {
     });
   }
 
-  if (!isYouTube(url) && !isTikTok(url) && !isInstagram(url) && !isTwitter(url)) {
-    return message.reply({ embeds: [errorEmbed('Solo se aceptan links de YouTube, TikTok, Instagram, Twitter/X o Spotify.')] });
+  if (!isYouTube(url) && !isTikTok(url) && !isInstagram(url) && !isTwitter(url) && !isSoundCloud(url)) {
+    return message.reply({ embeds: [errorEmbed('Solo se aceptan links de YouTube, TikTok, Instagram, Twitter/X, Spotify o SoundCloud.')] });
   }
 
   const thinking = await message.reply({ embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setDescription('Descargando video...')] });
