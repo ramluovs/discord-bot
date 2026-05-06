@@ -4,10 +4,8 @@ const {
   ButtonStyle,
   EmbedBuilder
 } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
 
-const DATA_FILE_PATH = path.join(__dirname, '..', 'data.json');
+const CARD_DATA_CHANNEL_ID = '1499642971614613574';
 const QUIZ_TIMEOUT_SECONDS = 30;
 const PASTEL_BLUE = 0xaeefff;
 const ALLOWED_ROLES = ['1340864854243803248', '1500217745889824898'];
@@ -25,14 +23,46 @@ let total = 0;
 let maxQuestions = null;
 let activeCollector = null;
 
-if (fs.existsSync(DATA_FILE_PATH)) {
-  const data = JSON.parse(fs.readFileSync(DATA_FILE_PATH));
-  cards = (data.cards || []).map(c => ({ korean: c.korean, roman: c.roman, audioUrl: c.audioUrl || null }));
-  history = data.history || [];
+async function fetchCardsFromDiscord(client) {
+  try {
+    const channel = await client.channels.fetch(CARD_DATA_CHANNEL_ID);
+    if (!channel || !channel.isTextBased()) return [];
+    let all = [], before = null;
+    while (true) {
+      const msgs = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
+      if (!msgs.size) break;
+      for (const msg of msgs.values()) {
+        if (msg.author.bot && msg.content.startsWith('CARD:')) {
+          try {
+            const data = JSON.parse(msg.content.slice(5));
+            const audioUrl = msg.attachments.first()?.url || null;
+            all.push({ ...data, audioUrl, messageId: msg.id });
+          } catch {}
+        }
+        before = msg.id;
+      }
+      if (msgs.size < 100) break;
+    }
+    return all.reverse();
+  } catch { return []; }
 }
 
-function saveData() {
-  fs.writeFileSync(DATA_FILE_PATH, JSON.stringify({ cards, history }, null, 2));
+async function saveCardToDiscord(client, korean, roman, english, audioUrl) {
+  const channel = await client.channels.fetch(CARD_DATA_CHANNEL_ID);
+  if (!channel || !channel.isTextBased()) throw new Error('Card channel unavailable');
+  const content = `CARD:${JSON.stringify({ korean, roman, english: english || null })}`;
+  const payload = { content };
+  if (audioUrl) payload.files = [{ attachment: audioUrl, name: 'audio.mp3' }];
+  const msg = await channel.send(payload);
+  return msg;
+}
+
+async function deleteCardFromDiscord(client, messageId) {
+  try {
+    const channel = await client.channels.fetch(CARD_DATA_CHANNEL_ID);
+    const msg = await channel.messages.fetch(messageId);
+    await msg.delete();
+  } catch {}
 }
 
 function hasCardRole(message) {
@@ -90,6 +120,7 @@ function createQuestionEmbed(message, correct, options) {
         `score: ${score}/${total}`,
         '',
         `What is **${correct.korean}** in romanization?`,
+        ...(correct.english ? [`-# ${correct.english}`] : []),
         '',
         ...options.map((option, index) => `${index + 1}. ${option.roman}`),
         '',
@@ -124,31 +155,13 @@ function createFinalScoreEmbed() {
     .setDescription([`Final Score: ${score}/${total}`, `Percentage: ${percentage}%`].join('\n'));
 }
 
-function createCardsEmbed() {
-  const list = cards.map((card, index) => `${index + 1}. ${card.korean} (${card.roman})`).join('\n');
-  const hist = history.slice(-10).map((entry, index) => `${index + 1}. ${entry.score}/${entry.total}`).join('\n');
-
-  return createBlueEmbed(
-    '✧ ˚ ༘ ⋆｡° card collection °｡⋆ ༘ ˚ ✧',
-    [
-      '✦ cards ✦',
-      '',
-      list,
-      '',
-      '✦ recent history ✦',
-      '',
-      hist || 'None'
-    ].join('\n')
-  );
-}
-
 function createEmptyCardsEmbed(reason) {
   return createBlueEmbed(
     '☁️ ✦ no cards yet ✦',
     [
       reason,
       '',
-      'Add one with `;addcard korean | romanization` or `chi addcard korean | romanization`.'
+      'Add one with `;addcard korean / romanization / english` or `chi addcard korean / romanization`.'
     ].join('\n')
   );
 }
@@ -230,7 +243,6 @@ async function sendQuestion(message) {
       quizActive = false;
       history.push({ score, total });
       if (history.length > 10) history.shift();
-      saveData();
 
       return quizMessage.reply({ embeds: [createFinalScoreEmbed()] });
     }
@@ -253,7 +265,6 @@ async function sendQuestion(message) {
       quizActive = false;
       history.push({ score, total });
       if (history.length > 10) history.shift();
-      saveData();
 
       return quizMessage.reply({ embeds: [createFinalScoreEmbed()] });
     }
@@ -269,68 +280,75 @@ async function execute(message, parsedCommand) {
   const { commandName: command, args } = parsedCommand;
 
   if (command === 'addcard') {
-    const text = args.join(' ');
-    const parts = text.split('|');
-
-    if (parts.length < 2) {
+    const text = args.join(' ').trim();
+    if (!text) {
       return message.reply({
-        embeds: [
-          createActionEmbed('✦ add format ✦', [
-            'Use:',
-            '',
-            '`;addcard korean | romanization`',
-            '`chi addcard korean | romanization`'
-          ])
-        ]
+        embeds: [createActionEmbed('✦ addcard format ✦', [
+          'Use:',
+          '',
+          '`;addcard korean / romanization / english`',
+          '`chi addcard korean / romanization / english`',
+          '',
+          'English is optional:',
+          '`;addcard korean / romanization`',
+          '',
+          'You can also attach an .mp3 audio file.'
+        ])]
       });
     }
 
-    const korean = parts[0].trim();
-    const roman = parts[1].trim();
+    const parts = text.split('/').map(p => p.trim());
+    if (parts.length < 2) {
+      return message.reply({
+        embeds: [createActionEmbed('✦ addcard format ✦', [
+          'Use: `;addcard korean / romanization / english`',
+          'English is optional.'
+        ])]
+      });
+    }
+
+    const korean = parts[0];
+    const roman = parts[1];
+    const english = parts[2] || null;
     const attachment = message.attachments.first();
-    const audioUrl = attachment && attachment.contentType?.startsWith('audio/') ? attachment.url : null;
+    const audioUrl = attachment?.contentType?.startsWith('audio/') ? attachment.url : null;
 
-    cards.push({ korean, roman, audioUrl });
-    saveData();
-
-    return message.reply({
-      embeds: [
-        createActionEmbed('✧ card saved ✧', [
+    try {
+      await saveCardToDiscord(message.client, korean, roman, english, audioUrl);
+      return message.reply({
+        embeds: [createActionEmbed('✧ card saved ✧', [
           `Korean: **${korean}**`,
           `Romanization: **${roman}**`,
+          `English: **${english || 'not provided'}**`,
           `Audio: ${audioUrl ? 'attached' : 'none'}`
-        ])
-      ]
-    });
+        ])]
+      });
+    } catch (e) {
+      return message.reply({ embeds: [createActionEmbed('error', ['Failed to save card.'])] });
+    }
   }
 
   if (command === 'cards') {
-    if (cards.length === 0) {
-      return message.reply({
-        embeds: [createEmptyCardsEmbed('Your study deck is empty right now.')]
-      });
+    const allCards = await fetchCardsFromDiscord(message.client);
+    if (!allCards.length) {
+      return message.reply({ embeds: [createEmptyCardsEmbed('Your study deck is empty right now.')] });
     }
-
-    return message.reply({ embeds: [createCardsEmbed()] });
+    const list = allCards.map((card, i) => `${i + 1}. ${card.korean} / ${card.roman}${card.english ? ` / ${card.english}` : ''}`).join('\n');
+    return message.reply({ embeds: [createBlueEmbed('✧ ˚ ༘ ⋆｡° card collection °｡⋆ ༘ ˚ ✧', list)] });
   }
 
   if (command === 'quiz') {
-    if (cards.length === 0) {
+    cards = await fetchCardsFromDiscord(message.client);
+    if (!cards.length) {
       return message.reply({
         embeds: [createEmptyCardsEmbed('You need at least one card before starting a quiz.')]
       });
     }
-
     quizActive = true;
     score = 0;
     total = 0;
     maxQuestions = args[0] ? parseInt(args[0]) : null;
-
-    if (activeCollector) {
-      activeCollector.stop('restart');
-      activeCollector = null;
-    }
-
+    if (activeCollector) { activeCollector.stop('restart'); activeCollector = null; }
     return sendQuestion(message);
   }
 
@@ -352,37 +370,29 @@ async function execute(message, parsedCommand) {
 
     history.push({ score, total });
     if (history.length > 10) history.shift();
-    saveData();
 
     return message.reply({ embeds: [createFinalScoreEmbed()] });
   }
 
   if (command === 'deletecard') {
+    const allCards = await fetchCardsFromDiscord(message.client);
     const index = parseInt(args[0]) - 1;
-
-    if (isNaN(index) || !cards[index]) {
+    if (isNaN(index) || !allCards[index]) {
       return message.reply({
-        embeds: [
-          createActionEmbed('✦ invalid card number ✦', [
-            'Pick a valid card number from your saved list.'
-          ])
-        ]
+        embeds: [createActionEmbed('✦ invalid card number ✦', ['Pick a valid card number from your saved list.'])]
       });
     }
-
+    const card = allCards[index];
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`del_yes_${index}`).setLabel('Yes').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`del_yes_${card.messageId}`).setLabel('Yes').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('del_no').setLabel('No').setStyle(ButtonStyle.Secondary)
     );
-
     return message.reply({
-      embeds: [
-        createActionEmbed('♡ delete this card? ♡', [
-          `Card ${index + 1}: **${cards[index].korean}** (${cards[index].roman})`,
-          '',
-          'This action cannot be undone.'
-        ])
-      ],
+      embeds: [createActionEmbed('♡ delete this card? ♡', [
+        `Card ${index + 1}: **${card.korean}** / ${card.roman}${card.english ? ` / ${card.english}` : ''}`,
+        '',
+        'This action cannot be undone.'
+      ])],
       components: [row]
     });
   }
@@ -392,15 +402,8 @@ async function execute(message, parsedCommand) {
       new ButtonBuilder().setCustomId('reset_yes').setLabel('Yes').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('reset_no').setLabel('No').setStyle(ButtonStyle.Secondary)
     );
-
     return message.reply({
-      embeds: [
-        createActionEmbed('✧ reset all cards? ✧', [
-          'This will remove your entire saved deck.',
-          '',
-          'Press a button below to choose.'
-        ])
-      ],
+      embeds: [createActionEmbed('✧ reset all cards? ✧', ['This will remove your entire saved deck.', '', 'Press a button below to choose.'])],
       components: [row]
     });
   }
@@ -414,9 +417,8 @@ async function handleInteraction(interaction) {
   const id = interaction.customId;
 
   if (id.startsWith('del_yes_')) {
-    const index = parseInt(id.split('_')[2]);
-    cards.splice(index, 1);
-    saveData();
+    const messageId = id.replace('del_yes_', '');
+    await deleteCardFromDiscord(interaction.client, messageId);
     await interaction.update({
       embeds: [createActionEmbed('✦ card deleted ✦', ['The selected card has been removed.'])],
       components: []
@@ -451,8 +453,10 @@ async function handleInteraction(interaction) {
   }
 
   if (id === 'confirm_reset') {
-    cards = [];
-    saveData();
+    const allCards = await fetchCardsFromDiscord(interaction.client);
+    for (const card of allCards) {
+      await deleteCardFromDiscord(interaction.client, card.messageId);
+    }
     await interaction.update({
       embeds: [createActionEmbed('♡ all cards deleted ♡', ['Your saved deck has been cleared.'])],
       components: []
