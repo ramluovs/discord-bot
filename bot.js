@@ -4,6 +4,7 @@ const {
 } = require('discord.js');
 const ask = require('./commands/ask');
 const cards = require('./commands/cards');
+const lyrics = require('./commands/lyrics');
 const convert = require('./commands/media/convert');
 const yt = require('./commands/media/yt');
 const dl = require('./commands/media/dl');
@@ -29,6 +30,7 @@ const moderationCommands = {
 };
 
 const CARD_COMMANDS = ['addcard', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
+const LYRICS_COMMANDS = ['lyricaudio'];
 const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks', 'banana', 'moneda', 'flip', 'coin', 'tictactoe'];
 const MEDIA_COMMANDS = ['c', 'yt', 'dl'];
 const MUSIC_COMMANDS = ['musicadd', 'musicdelete', 'musiclist', 'addmusicimage', 'musictrack', 'musicuntrack', 'musictracklist'];
