@@ -110,6 +110,10 @@ client.on('messageCreate', async message => {
     return cards.execute(message, parsedCommand);
   }
 
+  if (LYRICS_COMMANDS.includes(parsedCommand.commandName)) {
+    return lyrics.execute(message, parsedCommand);
+  }
+
   if (FUN_COMMANDS.includes(parsedCommand.commandName)) {
     return fun.execute(message, parsedCommand);
   }
