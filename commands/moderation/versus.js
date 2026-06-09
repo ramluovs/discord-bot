@@ -1,38 +1,27 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
 
 const PASTEL_BLUE = 0xaeefff;
-const VERSUS_FILE = path.join(__dirname, '../../data/versus.json');
 const VERSUS_ROLES = ['1340864854243803248', '1500019909063606342'];
 const PAGE_SIZE = 40;
 const VERSUS_URL = 'https://chidoris.lovable.app/api/public/versus';
+
 async function loadVersus() {
   try {
     const res = await fetch(VERSUS_URL);
-
     if (!res.ok) throw new Error('bad status');
 
     const data = await res.json();
 
     return {
       imageUrl: data.imageUrl ?? null,
-      entries: Array.isArray(data.entries) ? data.entries : [],
+      entries: Array.isArray(data.entries) ? data.entries : []
     };
   } catch {
     return {
       imageUrl: null,
-      entries: [],
+      entries: []
     };
   }
-}
-
-function saveVersus(data) {
-  try {
-    const dir = path.dirname(VERSUS_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(VERSUS_FILE, JSON.stringify(data, null, 2));
-  } catch (e) { console.error('Failed to save versus:', e); }
 }
 
 function hasVersusRole(member) {
@@ -46,20 +35,20 @@ function buildVersusEmbed(list, page, totalPages, imageUrl) {
   const description = [
     entries.map((entry, i) => `♡ ${start + i + 1}. <@${entry.userId}> ${entry.description}`).join('\n'),
     '',
-    '-# Para agregar alguien usa `versusadd`, para eliminar usa `versusdelete`.',
+    '-# Edita esta lista desde la app.',
     `-# Página ${page + 1}/${totalPages}`
   ].join('\n');
 
   const embed = new EmbedBuilder()
-  .setColor(PASTEL_BLUE)
-  .setTitle('✧ versus')
-  .setDescription(description);
+    .setColor(PASTEL_BLUE)
+    .setTitle('✧ versus')
+    .setDescription(description);
 
-if (imageUrl) {
-  embed.setImage(imageUrl);
-}
+  if (imageUrl) {
+    embed.setImage(imageUrl);
+  }
 
-return embed;
+  return embed;
 }
 
 function buildNavButtons(page, totalPages, disabled = false) {
@@ -104,7 +93,7 @@ async function handleVersus(message) {
   if (totalPages <= 1) return;
 
   const collector = botReply.createMessageComponentCollector({
-    filter: i => (i.customId === 'versus_prev' || i.customId === 'versus_next'),
+    filter: i => i.customId === 'versus_prev' || i.customId === 'versus_next',
     time: 5 * 60 * 1000
   });
 
@@ -125,145 +114,59 @@ async function handleVersus(message) {
   });
 }
 
-  const totalPages = Math.ceil(list.length / PAGE_SIZE);
-  let page = 0;
-
-  const components = totalPages > 1 ? [buildNavButtons(page, totalPages)] : [];
-  const botReply = await message.reply({
-    embeds: [buildVersusEmbed(list, page, totalPages)],
-    components
-  });
-
-  if (totalPages <= 1) return;
-
-  const collector = botReply.createMessageComponentCollector({
-    filter: i => (i.customId === 'versus_prev' || i.customId === 'versus_next'),
-    time: 5 * 60 * 1000
-  });
-
-  collector.on('collect', async interaction => {
-    if (interaction.customId === 'versus_prev' && page > 0) page--;
-    if (interaction.customId === 'versus_next' && page < totalPages - 1) page++;
-    await interaction.update({
-      embeds: [buildVersusEmbed(list, page, totalPages)],
-      components: [buildNavButtons(page, totalPages)]
-    });
-  });
-
-  collector.on('end', () => {
-    botReply.edit({ components: [buildNavButtons(page, totalPages, true)] }).catch(() => {});
-  });
-}
-
-async function handleVersusAdd(message, args) {
+async function handleVersusAdd(message) {
   if (!message.member || !hasVersusRole(message.member)) {
     return message.reply({
-      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('No tienes permiso para usar este comando.')]
+      embeds: [
+        new EmbedBuilder()
+          .setColor(PASTEL_BLUE)
+          .setTitle('error')
+          .setDescription('No tienes permiso para usar este comando.')
+      ]
     });
   }
-
-  const userId = args[0];
-  const description = args.slice(1).join(' ').trim();
-
-  if (!userId || !/^\d+$/.test(userId)) {
-    return message.reply({
-      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('Debes proporcionar un ID de usuario válido.\n\nPara obtener un ID: activa el modo desarrollador en Discord (Ajustes → Avanzado → Modo desarrollador), luego haz clic derecho en el usuario y selecciona "Copiar ID".')]
-    });
-  }
-
-  if (!description) {
-    return message.reply({
-      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('Debes agregar una descripción después del ID.\nEjemplo: `versusadd 123456789 guns & flame`')]
-    });
-  }
-
-  const list = await loadVersus();
-
-  if (list.some(e => e.userId === userId)) {
-    return message.reply({
-      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('Ese usuario ya está en la lista.')]
-    });
-  }
-
-  list.push({ userId, description });
-  saveVersus(list);
 
   return message.reply({
-    embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('✧ versus').setDescription(`<@${userId}> fue agregado a la lista en el lugar #${list.length}.`)]
+    embeds: [
+      new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setTitle('✧ versus')
+        .setDescription('Ahora esta lista se edita desde la app, no desde Discord.')
+    ]
   });
 }
 
-async function handleVersusDelete(message, args) {
+async function handleVersusDelete(message) {
   if (!message.member || !hasVersusRole(message.member)) {
     return message.reply({
-      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('No tienes permiso para usar este comando.')]
+      embeds: [
+        new EmbedBuilder()
+          .setColor(PASTEL_BLUE)
+          .setTitle('error')
+          .setDescription('No tienes permiso para usar este comando.')
+      ]
     });
   }
 
-  const numberArg = parseInt(args[0]);
-
-  if (!args[0] || isNaN(numberArg) || numberArg < 1) {
-    return message.reply({
-      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription('Debes indicar el número de la persona en la lista.\nEjemplo: `versusdelete 5`')]
-    });
-  }
-
-  const list = await loadVersus();
-
-  if (numberArg > list.length) {
-    return message.reply({
-      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('error').setDescription(`No existe el número ${numberArg} en la lista. La lista tiene ${list.length} personas.`)]
-    });
-  }
-
-  const entry = list[numberArg - 1];
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('vdel_yes').setLabel('Sí').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('vdel_no').setLabel('No').setStyle(ButtonStyle.Secondary)
-  );
-
-  const confirmMsg = await message.reply({
-    embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('✧ versus').setDescription(`¿Estás seguro de que quieres eliminar a <@${entry.userId}> (#${numberArg}) de la lista?`)],
-    components: [row]
-  });
-
-  const filter = i => (i.customId === 'vdel_yes' || i.customId === 'vdel_no') && i.user.id === message.author.id;
-  const collector = confirmMsg.createMessageComponentCollector({ filter, max: 1, time: 30 * 1000 });
-
-  collector.on('collect', async interaction => {
-    if (interaction.customId === 'vdel_no') {
-      return interaction.update({
-        embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('✧ versus').setDescription('Eliminación cancelada.')],
-        components: []
-      });
-    }
-
-    list.splice(numberArg - 1, 1);
-    saveVersus(list);
-
-    return interaction.update({
-      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('✧ versus').setDescription(`<@${entry.userId}> fue eliminado de la lista. Los números han sido actualizados.`)],
-      components: []
-    });
-  });
-
-  collector.on('end', collected => {
-    if (!collected.size) {
-      confirmMsg.edit({ components: [] }).catch(() => {});
-    }
+  return message.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setTitle('✧ versus')
+        .setDescription('Ahora esta lista se edita desde la app, no desde Discord.')
+    ]
   });
 }
 
 module.exports = {
   async execute(message, second) {
     const commandName = Array.isArray(second) ? null : second?.commandName;
-    const args = Array.isArray(second) ? second : (second?.args || []);
     const cmd = commandName || 'versus';
 
     if (cmd === 'versus') return handleVersus(message);
-    if (cmd === 'versusadd') return handleVersusAdd(message, args);
-    if (cmd === 'versusdelete') return handleVersusDelete(message, args);
+    if (cmd === 'versusadd') return handleVersusAdd(message);
+    if (cmd === 'versusdelete') return handleVersusDelete(message);
+
     return false;
   }
 };
