@@ -39,7 +39,7 @@ function hasVersusRole(member) {
   return VERSUS_ROLES.some(roleId => member.roles.cache.has(roleId));
 }
 
-function buildVersusEmbed(list, page, totalPages) {
+function buildVersusEmbed(list, page, totalPages, imageUrl) {
   const start = page * PAGE_SIZE;
   const entries = list.slice(start, start + PAGE_SIZE);
 
@@ -50,11 +50,16 @@ function buildVersusEmbed(list, page, totalPages) {
     `-# Página ${page + 1}/${totalPages}`
   ].join('\n');
 
-  return new EmbedBuilder()
-    .setColor(PASTEL_BLUE)
-    .setTitle('✧ versus')
-    .setDescription(description)
-    .setImage(VERSUS_IMAGE);
+  const embed = new EmbedBuilder()
+  .setColor(PASTEL_BLUE)
+  .setTitle('✧ versus')
+  .setDescription(description);
+
+if (imageUrl) {
+  embed.setImage(imageUrl);
+}
+
+return embed;
 }
 
 function buildNavButtons(page, totalPages, disabled = false) {
@@ -73,13 +78,52 @@ function buildNavButtons(page, totalPages, disabled = false) {
 }
 
 async function handleVersus(message) {
-  const list = await loadVersus();
+  const { imageUrl, entries } = await loadVersus();
 
-  if (!list.length) {
+  if (!entries.length) {
     return message.reply({
-      embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setTitle('✧ versus').setDescription('No hay nadie en la lista todavía.')]
+      embeds: [
+        new EmbedBuilder()
+          .setColor(PASTEL_BLUE)
+          .setTitle('✧ versus')
+          .setDescription('No hay nadie en la lista todavía.')
+      ]
     });
   }
+
+  const totalPages = Math.ceil(entries.length / PAGE_SIZE);
+  let page = 0;
+
+  const components = totalPages > 1 ? [buildNavButtons(page, totalPages)] : [];
+
+  const botReply = await message.reply({
+    embeds: [buildVersusEmbed(entries, page, totalPages, imageUrl)],
+    components
+  });
+
+  if (totalPages <= 1) return;
+
+  const collector = botReply.createMessageComponentCollector({
+    filter: i => (i.customId === 'versus_prev' || i.customId === 'versus_next'),
+    time: 5 * 60 * 1000
+  });
+
+  collector.on('collect', async interaction => {
+    if (interaction.customId === 'versus_prev' && page > 0) page--;
+    if (interaction.customId === 'versus_next' && page < totalPages - 1) page++;
+
+    await interaction.update({
+      embeds: [buildVersusEmbed(entries, page, totalPages, imageUrl)],
+      components: [buildNavButtons(page, totalPages)]
+    });
+  });
+
+  collector.on('end', () => {
+    botReply.edit({
+      components: [buildNavButtons(page, totalPages, true)]
+    }).catch(() => {});
+  });
+}
 
   const totalPages = Math.ceil(list.length / PAGE_SIZE);
   let page = 0;
