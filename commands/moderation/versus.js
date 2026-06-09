@@ -6,13 +6,19 @@ const PASTEL_BLUE = 0xaeefff;
 const VERSUS_FILE = path.join(__dirname, '../../data/versus.json');
 const VERSUS_ROLES = ['1340864854243803248', '1500019909063606342'];
 const PAGE_SIZE = 40;
-const VERSUS_IMAGE = 'https://cdn.discordapp.com/attachments/1376142899883806791/1389312974833061950/1637321372980.gif?ex=69f64389&is=69f4f209&hm=88e3b11f45786dbbde76245a8c3d2a1534dc58c67b68f299c61f0523498fa56a&';
-
-function loadVersus() {
+const VERSUS_URL = 'https://chidoris.lovable.app/api/public/versus';
+async function loadVersus() {
   try {
-    if (!fs.existsSync(VERSUS_FILE)) return [];
-    return JSON.parse(fs.readFileSync(VERSUS_FILE, 'utf8'));
-  } catch { return []; }
+    const res = await fetch(VERSUS_URL);
+
+    if (!res.ok) throw new Error('bad status');
+
+    const data = await res.json();
+
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
 }
 
 function saveVersus(data) {
@@ -61,7 +67,7 @@ function buildNavButtons(page, totalPages, disabled = false) {
 }
 
 async function handleVersus(message) {
-  const list = loadVersus();
+  const list = await loadVersus();
 
   if (!list.length) {
     return message.reply({
@@ -121,7 +127,7 @@ async function handleVersusAdd(message, args) {
     });
   }
 
-  const list = loadVersus();
+  const list = await loadVersus();
 
   if (list.some(e => e.userId === userId)) {
     return message.reply({
@@ -152,7 +158,7 @@ async function handleVersusDelete(message, args) {
     });
   }
 
-  const list = loadVersus();
+  const list = await loadVersus();
 
   if (numberArg > list.length) {
     return message.reply({
