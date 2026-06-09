@@ -35,7 +35,7 @@ function buildVersusEmbed(list, page, totalPages, imageUrl) {
   const description = [
     entries.map((entry, i) => `♡ ${start + i + 1}. <@${entry.userId}> ${entry.description}`).join('\n'),
     '',
-    '-# Edita esta lista desde la app.',
+    '-# Edita esta lista desde el sitio web: https://chidoris.lovable.app/auth',
     `-# Página ${page + 1}/${totalPages}`
   ].join('\n');
 
