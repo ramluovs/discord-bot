@@ -70,14 +70,16 @@ function saveBirthdays(data) {
   } catch (e) { console.error('Failed to save birthdays:', e); }
 }
 
-function loadLinks() {
+async function loadLinks() {
   try {
-    if (!fs.existsSync(LINKS_FILE)) {
-      saveLinks(DEFAULT_LINKS);
-      return DEFAULT_LINKS;
-    }
-    return JSON.parse(fs.readFileSync(LINKS_FILE, 'utf8'));
-  } catch { return DEFAULT_LINKS; }
+    const res = await fetch('https://chidoris.lovable.app/api/public/links');
+
+    if (!res.ok) throw new Error('bad status');
+
+    return await res.json();
+  } catch {
+    return DEFAULT_LINKS;
+  }
 }
 
 function saveLinks(data) {
@@ -652,7 +654,7 @@ async function handleTicTacToeCommand(message, args) {
 }
 
 async function handleLinksCommand(message) {
-  const linksData = loadLinks();
+  const linksData = await loadLinks();
   const expiresAt = Math.floor((Date.now() + 3 * 60 * 1000) / 1000);
 
   if (!linksData.pages?.length) {
@@ -730,7 +732,7 @@ async function handleEditLinksCommand(message, args) {
     return message.reply({ embeds: [createEditLinksUsageEmbed()] });
   }
 
-  const linksData = loadLinks();
+  const linksData = await loadLinks();
 
   if (args[0].toLowerCase() === 'add') {
     const pageArg = args[args.length - 1];
