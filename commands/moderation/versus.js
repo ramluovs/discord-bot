@@ -15,9 +15,15 @@ async function loadVersus() {
 
     const data = await res.json();
 
-    return Array.isArray(data) ? data : [];
+    return {
+      imageUrl: data.imageUrl ?? null,
+      entries: Array.isArray(data.entries) ? data.entries : [],
+    };
   } catch {
-    return [];
+    return {
+      imageUrl: null,
+      entries: [],
+    };
   }
 }
 
