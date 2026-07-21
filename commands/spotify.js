@@ -1,5 +1,5 @@
 const SpotifyWebApi = require('spotify-web-api-node');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 // Configuración
 const BABY_BLUE = '#89CFF0';
@@ -19,7 +19,8 @@ let streamConfig = {
   extraSeconds: 5,
   lastSkippedTrackId: null,
   startTime: null,
-  skippedCount: 0
+  skippedCount: 0,
+  notifyOnSkip: true
 };
 
 let pollInterval = null;
@@ -71,7 +72,7 @@ async function checkAndSkip(client) {
       // Saltar a la siguiente canción
       await spotifyApi.skipToNext();
 
-      // Esperar un momento breve para que Spotify actualice la reproducción
+      // Esperar un momento breve para obtener la nueva canción
       await new Promise(resolve => setTimeout(resolve, 800));
 
       let newTrack = null;
@@ -84,7 +85,8 @@ async function checkAndSkip(client) {
         console.error('Error al obtener la nueva canción:', e.message);
       }
 
-      if (client) {
+      // Solo enviar mensaje si la notificación está activada
+      if (streamConfig.notifyOnSkip && client) {
         try {
           const targetChannel = client.channels.cache.get(TARGET_CHANNEL_ID) || await client.channels.fetch(TARGET_CHANNEL_ID);
           if (targetChannel) {
@@ -121,7 +123,7 @@ module.exports = {
       const unauthorizedEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
         .setTitle('🔒 Solo el Dueño ♡')
-        .setDescription(`Lo siento, <@${message.author.id}>. Por ahora los comandos de Spotify están reservados únicamente para mi creadora ♡`)
+        .setDescription(`Lo siento, <@${message.author.id}>. Por ahora los comandos de Spotify están reservados únicamente para mi creador/a ♡`)
         .setFooter({ text: 'Próximamente disponible para todos ♡' });
 
       return message.reply({ embeds: [unauthorizedEmbed] });
@@ -178,6 +180,7 @@ module.exports = {
         streamConfig.extraSeconds = seconds;
         streamConfig.startTime = Date.now();
         streamConfig.skippedCount = 0;
+        streamConfig.notifyOnSkip = true; // Por defecto envía mensajes
 
         if (!pollInterval) {
           pollInterval = setInterval(() => checkAndSkip(message.client), 2500);
@@ -200,15 +203,89 @@ module.exports = {
         const streamEmbed = new EmbedBuilder()
           .setColor(BABY_BLUE)
           .setTitle('chi stream ♡')
-          .setDescription(`chi stream ♡ modo: **ENCENDIDO**\n\n🎶 **Reproduciendo actualmente:**\n${currentlyPlayingText}`)
+          .setDescription(`chi stream ♡ modo: **ENCENDIDO**\n\n🎶 **Reproduciendo actualmente:**\n${currentlyPlayingText}\n\n¿Quieres que envíe un mensaje cada vez que se salte una canción? ♡`)
           .addFields(
             { name: 'Porcentaje', value: `**${percent}%**`, inline: true },
             { name: 'Segundos extra', value: `**+${seconds}s**`, inline: true }
           )
           .setThumbnail(thumbnailUrl)
-          .setFooter({ text: `Usa ${prefix}stream otra vez para desactivar ♡` });
+          .setFooter({ text: `Responde en 30s ♡` });
 
-        return message.reply({ embeds: [streamEmbed] });
+        // Botones de selección
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId('stream_notify_yes')
+            .setLabel('Sí ♡')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId('stream_notify_no')
+            .setLabel('No ♡')
+            .setStyle(ButtonStyle.Secondary)
+        );
+
+        const replyMsg = await message.reply({ embeds: [streamEmbed], components: [row] });
+
+        // Collector de botones (30 segundos)
+        const filter = i => i.user.id === message.author.id;
+        const collector = replyMsg.createMessageComponentCollector({ filter, time: 30000 });
+
+        collector.on('collect', async i => {
+          if (i.customId === 'stream_notify_yes') {
+            streamConfig.notifyOnSkip = true;
+          } else if (i.customId === 'stream_notify_no') {
+            streamConfig.notifyOnSkip = false;
+          }
+
+          const disabledRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId('stream_notify_yes')
+              .setLabel('Sí ♡')
+              .setStyle(ButtonStyle.Success)
+              .setDisabled(true),
+            new ButtonBuilder()
+              .setCustomId('stream_notify_no')
+              .setLabel('No ♡')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(true)
+          );
+
+          const updatedEmbed = EmbedBuilder.from(streamEmbed)
+            .setFooter({ text: streamConfig.notifyOnSkip ? 'Notificaciones activadas ♡' : 'Notificaciones desactivadas ♡' });
+
+          await i.update({ embeds: [updatedEmbed], components: [disabledRow] });
+          collector.stop();
+        });
+
+        collector.on('end', async (collected, reason) => {
+          if (reason === 'time' && collected.size === 0) {
+            // Pasaron 30 segundos sin tocar nada: se mantiene activado por defecto
+            streamConfig.notifyOnSkip = true;
+
+            const disabledRow = new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId('stream_notify_yes')
+                .setLabel('Sí ♡')
+                .setStyle(ButtonStyle.Success)
+                .setDisabled(true),
+              new ButtonBuilder()
+                .setCustomId('stream_notify_no')
+                .setLabel('No ♡')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(true)
+            );
+
+            const expiredEmbed = EmbedBuilder.from(streamEmbed)
+              .setFooter({ text: 'Tiempo agotado (notificaciones activadas por defecto) ♡' });
+
+            try {
+              await replyMsg.edit({ embeds: [expiredEmbed], components: [disabledRow] });
+            } catch (err) {
+              console.error('Error al actualizar mensaje expirado:', err.message);
+            }
+          }
+        });
+
+        return;
       }
 
       // --- COMANDO PLAY ---
