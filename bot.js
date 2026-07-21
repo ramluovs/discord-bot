@@ -4,13 +4,13 @@ const {
 } = require('discord.js');
 const ask = require('./commands/ask');
 const cards = require('./commands/cards');
-const lyrics = require('./commands/lyrics');
 const convert = require('./commands/media/convert');
 const yt = require('./commands/media/yt');
 const dl = require('./commands/media/dl');
 const ig = require('./commands/media/ig');
 const fun = require('./commands/fun');
 const music = require('./music/music');
+const spotify = require('./commands/spotify');
 const roblox = require('./commands/roblox');
 const versus = require('./commands/moderation/versus');
 const moderationCommands = {
@@ -29,11 +29,11 @@ const moderationCommands = {
   versusdelete: versus
 };
 
-const CARD_COMMANDS = ['addcard', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
-const LYRICS_COMMANDS = ['lyricaudio'];
+const CARD_COMMANDS = ['addcard', 'cards', 'quiz', 'stopcard', 'deletecard', 'resetcards'];
 const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks', 'banana', 'moneda', 'flip', 'coin', 'tictactoe'];
 const MEDIA_COMMANDS = ['c', 'yt', 'dl'];
 const MUSIC_COMMANDS = ['musicadd', 'musicdelete', 'musiclist', 'addmusicimage', 'musictrack', 'musicuntrack', 'musictracklist'];
+const SPOTIFY_COMMANDS = ['play', 'pause', 'stop', 'skip', 'stream', 'sp'];
 const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group', 'rs'];
 
 const client = new Client({
@@ -110,10 +110,6 @@ client.on('messageCreate', async message => {
     return cards.execute(message, parsedCommand);
   }
 
-  if (LYRICS_COMMANDS.includes(parsedCommand.commandName)) {
-    return lyrics.execute(message, parsedCommand);
-  }
-
   if (FUN_COMMANDS.includes(parsedCommand.commandName)) {
     return fun.execute(message, parsedCommand);
   }
@@ -136,6 +132,10 @@ client.on('messageCreate', async message => {
 
   if (MUSIC_COMMANDS.includes(parsedCommand.commandName)) {
     return music.execute(message, parsedCommand);
+  }
+
+  if (SPOTIFY_COMMANDS.includes(parsedCommand.commandName)) {
+    return spotify.execute(message, parsedCommand);
   }
 
   if (ROBLOX_COMMANDS.includes(parsedCommand.commandName)) {
