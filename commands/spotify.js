@@ -121,7 +121,7 @@ module.exports = {
       const unauthorizedEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
         .setTitle('🔒 Solo el Dueño ♡')
-        .setDescription(`Lo siento, <@${message.author.id}>. Por ahora los comandos de Spotify están reservados únicamente para mi creador/a ♡`)
+        .setDescription(`Lo siento, <@${message.author.id}>. Por ahora los comandos de Spotify están reservados únicamente para mi creadora ♡`)
         .setFooter({ text: 'Próximamente disponible para todos ♡' });
 
       return message.reply({ embeds: [unauthorizedEmbed] });
