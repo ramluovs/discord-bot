@@ -1,10 +1,10 @@
 const SpotifyWebApi = require('spotify-web-api-node');
 const { EmbedBuilder } = require('discord.js');
-const readline = require('readline');
 
-// Color Azul Pastel / Baby Blue y Canal Objetivo
+// Configuración
 const BABY_BLUE = '#89CFF0';
 const TARGET_CHANNEL_ID = '1528987534506594414';
+const AUTHORIZED_USER_ID = '425825170205179906';
 
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID,
@@ -24,40 +24,16 @@ let streamConfig = {
 
 let pollInterval = null;
 
-function askQuestion(query) {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-  });
-  return new Promise(resolve => rl.question(query, ans => {
-    rl.close();
-    resolve(ans.trim());
-  }));
-}
-
 async function ensureToken() {
-  if (!spotifyApi.getClientId()) {
-    const id = await askQuestion('🔑 Ingresa tu Spotify Client ID: ');
-    spotifyApi.setClientId(id);
-  }
-  if (!spotifyApi.getClientSecret()) {
-    const secret = await askQuestion('🔑 Ingresa tu Spotify Client Secret: ');
-    spotifyApi.setClientSecret(secret);
-  }
-  if (!spotifyApi.getRefreshToken()) {
-    const token = await askQuestion('🔑 Ingresa tu Spotify Refresh Token: ');
-    spotifyApi.setRefreshToken(token);
-  }
-
   try {
     const data = await spotifyApi.refreshAccessToken();
     spotifyApi.setAccessToken(data.body['access_token']);
   } catch (err) {
-    console.error('[Spotify] Error al actualizar token:', err.message);
+    console.error('[Spotify] Error actualizando token:', err.message);
   }
 }
 
-// Función para formatear el tiempo transcurrido con negritas
+// Formatear tiempo transcurrido en negrita
 function formatTime(ms) {
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
@@ -65,15 +41,9 @@ function formatTime(ms) {
   const seconds = totalSeconds % 60;
 
   let parts = [];
-  if (hours > 0) {
-    parts.push(`**${hours} ${hours === 1 ? 'hora' : 'horas'}**`);
-  }
-  if (minutes > 0) {
-    parts.push(`**${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}**`);
-  }
-  if (seconds > 0 || parts.length === 0) {
-    parts.push(`**${seconds} ${seconds === 1 ? 'segundo' : 'segundos'}**`);
-  }
+  if (hours > 0) parts.push(`**${hours} ${hours === 1 ? 'hora' : 'horas'}**`);
+  if (minutes > 0) parts.push(`**${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}**`);
+  if (seconds > 0 || parts.length === 0) parts.push(`**${seconds} ${seconds === 1 ? 'segundo' : 'segundos'}**`);
 
   if (parts.length === 1) return parts[0];
   if (parts.length === 2) return `${parts[0]} y ${parts[1]}`;
@@ -88,32 +58,52 @@ async function checkAndSkip(client) {
 
     if (!data.body || !data.body.is_playing || !data.body.item) return;
 
-    const track = data.body.item;
+    const oldTrack = data.body.item;
     const progressMs = data.body.progress_ms;
-    const durationMs = track.duration_ms;
+    const durationMs = oldTrack.duration_ms;
 
     const targetMs = (durationMs * (streamConfig.percent / 100)) + (streamConfig.extraSeconds * 1000);
 
-    if (progressMs >= targetMs && streamConfig.lastSkippedTrackId !== track.id) {
-      streamConfig.lastSkippedTrackId = track.id;
+    if (progressMs >= targetMs && streamConfig.lastSkippedTrackId !== oldTrack.id) {
+      streamConfig.lastSkippedTrackId = oldTrack.id;
       streamConfig.skippedCount++;
+
+      // Saltar a la siguiente canción
       await spotifyApi.skipToNext();
+
+      // Esperar un momento breve para que Spotify actualice la reproducción
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      let newTrack = null;
+      try {
+        const newPlayback = await spotifyApi.getMyCurrentPlaybackState();
+        if (newPlayback.body && newPlayback.body.item) {
+          newTrack = newPlayback.body.item;
+        }
+      } catch (e) {
+        console.error('Error al obtener la nueva canción:', e.message);
+      }
 
       if (client) {
         try {
           const targetChannel = client.channels.cache.get(TARGET_CHANNEL_ID) || await client.channels.fetch(TARGET_CHANNEL_ID);
           if (targetChannel) {
+            let descriptionText = `Se saltó **${oldTrack.name}** de **${oldTrack.artists[0].name}**`;
+            if (newTrack) {
+              descriptionText += ` a **${newTrack.name}** de **${newTrack.artists[0].name}**`;
+            }
+
             const skipEmbed = new EmbedBuilder()
               .setColor(BABY_BLUE)
               .setTitle('⚡ Auto-Salto ♡')
-              .setDescription(`¡Se saltó automáticamente **${track.name}** de **${track.artists[0].name}**! ♡`)
-              .setThumbnail(track.album.images[0]?.url || null)
+              .setDescription(descriptionText)
+              .setThumbnail(newTrack?.album?.images[0]?.url || oldTrack.album?.images[0]?.url || null)
               .setFooter({ text: `Saltado al ${streamConfig.percent}% + ${streamConfig.extraSeconds}s ♡` });
 
             targetChannel.send({ embeds: [skipEmbed] });
           }
         } catch (err) {
-          console.error('[Spotify] Error al enviar mensaje al canal objetivo:', err.message);
+          console.error('[Spotify] Error enviando mensaje al canal:', err.message);
         }
       }
     }
@@ -125,17 +115,29 @@ async function checkAndSkip(client) {
 module.exports = {
   async execute(message, parsedCommand) {
     const { commandName, args, prefix } = parsedCommand;
+
+    // Verificar si es el usuario autorizado
+    if (message.author.id !== AUTHORIZED_USER_ID) {
+      const unauthorizedEmbed = new EmbedBuilder()
+        .setColor(BABY_BLUE)
+        .setTitle('🔒 Solo el Dueño ♡')
+        .setDescription(`Lo siento, <@${message.author.id}>. Por ahora los comandos de Spotify están reservados únicamente para mi creador/a ♡`)
+        .setFooter({ text: 'Próximamente disponible para todos ♡' });
+
+      return message.reply({ embeds: [unauthorizedEmbed] });
+    }
+
     await ensureToken();
 
     try {
-      // --- COMANDO HELP (;help o chi help) ---
+      // --- COMANDO HELP ---
       if (commandName === 'help') {
         const helpEmbed = new EmbedBuilder()
           .setColor(BABY_BLUE)
           .setTitle('🎵 Comandos de Spotify ♡')
           .setDescription(`¡Puedes usar tanto \`;\` como \`chi \` como prefijo! ♡`)
           .addFields(
-            { name: '🟢 Modo Stream ♡', value: `\`${prefix}stream\` - Activa o desactiva el modo stream (**50% + 5s**)\n\`${prefix}stream 60 10\` - Ajusta porcentaje y segundos` },
+            { name: '🟢 Modo Stream ♡', value: `\`${prefix}stream\` - Activa o desactiva tu modo stream (**50% + 5s**)\n\`${prefix}stream 60 10\` - Ajusta porcentaje y segundos` },
             { name: '▶️ Controles de Reproducción ♡', value: `\`${prefix}play [canción]\` o \`${prefix}sp [canción]\` - Buscar y poner canción\n\`${prefix}pause\` - Pausar música\n\`${prefix}play\` - Reanudar música\n\`${prefix}skip\` - Saltar canción\n\`${prefix}stop\` - Detener música y apagar modo stream` }
           )
           .setFooter({ text: 'Spotify Premium Conectado ♡' });
@@ -143,11 +145,11 @@ module.exports = {
         return message.reply({ embeds: [helpEmbed] });
       }
 
-      // --- COMANDO STREAM (;stream o chi stream) ---
+      // --- COMANDO STREAM (TOGGLE) ---
       if (commandName === 'stream') {
         const option = args[0]?.toLowerCase();
 
-        // SI YA ESTÁ ENCENDIDO -> APAGAR (TOGGLE)
+        // APAGAR STREAM
         if (streamConfig.enabled || option === 'off' || option === 'stop') {
           const durationMs = Date.now() - (streamConfig.startTime || Date.now());
           const formattedTime = formatTime(durationMs);
@@ -161,13 +163,13 @@ module.exports = {
           const offEmbed = new EmbedBuilder()
             .setColor(BABY_BLUE)
             .setTitle('🔴 Modo Stream ♡')
-            .setDescription(`chi stream ♡ mode: **OFF**\n\n¡Sintonía finalizada! ♡\nTransmitiste **${songsCount} ${songsCount === 1 ? 'canción' : 'canciones'}** durante ${formattedTime}.`)
+            .setDescription(`chi stream ♡ modo: **APAGADO**\n\n¡Sintonía finalizada! ♡\nTransmitiste **${songsCount} ${songsCount === 1 ? 'canción' : 'canciones'}** durante ${formattedTime}.`)
             .setFooter({ text: 'Las canciones se reproducirán normalmente ♡' });
 
           return message.reply({ embeds: [offEmbed] });
         }
 
-        // SI ESTÁ APAGADO -> ENCENDER
+        // ENCENDER STREAM
         const percent = Number(args[0]) || 50;
         const seconds = Number(args[1]) || 5;
 
@@ -188,7 +190,7 @@ module.exports = {
           const playback = await spotifyApi.getMyCurrentPlaybackState();
           if (playback.body && playback.body.item) {
             const currentTrack = playback.body.item;
-            currentlyPlayingText = `**${currentTrack.name}** - ${currentTrack.artists[0].name}`;
+            currentlyPlayingText = `**${currentTrack.name}** - **${currentTrack.artists[0].name}**`;
             thumbnailUrl = currentTrack.album.images[0]?.url || null;
           }
         } catch (e) {
@@ -198,10 +200,10 @@ module.exports = {
         const streamEmbed = new EmbedBuilder()
           .setColor(BABY_BLUE)
           .setTitle('chi stream ♡')
-          .setDescription(`chi stream ♡ mode: **ON**\n\n🎶 **Reproduciendo actualmente:**\n${currentlyPlayingText}`)
+          .setDescription(`chi stream ♡ modo: **ENCENDIDO**\n\n🎶 **Reproduciendo actualmente:**\n${currentlyPlayingText}`)
           .addFields(
-            { name: 'Porcentaje', value: `${percent}%`, inline: true },
-            { name: 'Segundos extra', value: `+${seconds}s`, inline: true }
+            { name: 'Porcentaje', value: `**${percent}%**`, inline: true },
+            { name: 'Segundos extra', value: `**+${seconds}s**`, inline: true }
           )
           .setThumbnail(thumbnailUrl)
           .setFooter({ text: `Usa ${prefix}stream otra vez para desactivar ♡` });
@@ -209,7 +211,7 @@ module.exports = {
         return message.reply({ embeds: [streamEmbed] });
       }
 
-      // --- COMANDO PLAY (;play o chi play) ---
+      // --- COMANDO PLAY ---
       if (commandName === 'play' || commandName === 'sp') {
         const query = args.join(' ');
         if (!query) {
@@ -246,7 +248,7 @@ module.exports = {
         return message.reply({ embeds: [playEmbed] });
       }
 
-      // --- COMANDO PAUSE (;pause o chi pause) ---
+      // --- COMANDO PAUSE ---
       if (commandName === 'pause') {
         await spotifyApi.pause();
         const pauseEmbed = new EmbedBuilder()
@@ -257,7 +259,7 @@ module.exports = {
         return message.reply({ embeds: [pauseEmbed] });
       }
 
-      // --- COMANDO STOP (;stop o chi stop) ---
+      // --- COMANDO STOP ---
       if (commandName === 'stop') {
         await spotifyApi.pause();
         streamConfig.enabled = false;
@@ -272,7 +274,7 @@ module.exports = {
         return message.reply({ embeds: [stopEmbed] });
       }
 
-      // --- COMANDO SKIP (;skip o chi skip) ---
+      // --- COMANDO SKIP ---
       if (commandName === 'skip') {
         await spotifyApi.skipToNext();
         const skipEmbed = new EmbedBuilder()
@@ -284,7 +286,7 @@ module.exports = {
       }
 
     } catch (err) {
-      console.error('Error de ejecución en Spotify:', err);
+      console.error('Error ejecutando comando de Spotify:', err);
       const errorEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
         .setTitle('⚠️ Error de Spotify ♡')
