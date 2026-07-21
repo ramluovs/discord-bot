@@ -2,8 +2,9 @@ const SpotifyWebApi = require('spotify-web-api-node');
 const { EmbedBuilder } = require('discord.js');
 const readline = require('readline');
 
-// Color Azul Pastel / Baby Blue
+// Color Azul Pastel / Baby Blue y Canal Objetivo
 const BABY_BLUE = '#89CFF0';
+const TARGET_CHANNEL_ID = '1528987534506594414';
 
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID,
@@ -16,7 +17,9 @@ let streamConfig = {
   enabled: false,
   percent: 50,
   extraSeconds: 5,
-  lastSkippedTrackId: null
+  lastSkippedTrackId: null,
+  startTime: null,
+  skippedCount: 0
 };
 
 let pollInterval = null;
@@ -54,8 +57,31 @@ async function ensureToken() {
   }
 }
 
+// Función para formatear el tiempo transcurrido con negritas
+function formatTime(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  let parts = [];
+  if (hours > 0) {
+    parts.push(`**${hours} ${hours === 1 ? 'hora' : 'horas'}**`);
+  }
+  if (minutes > 0) {
+    parts.push(`**${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}**`);
+  }
+  if (seconds > 0 || parts.length === 0) {
+    parts.push(`**${seconds} ${seconds === 1 ? 'segundo' : 'segundos'}**`);
+  }
+
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} y ${parts[1]}`;
+  return `${parts[0]}, ${parts[1]} y ${parts[2]}`;
+}
+
 // Comprobador en segundo plano para el Modo Stream
-async function checkAndSkip(channel) {
+async function checkAndSkip(client) {
   try {
     await ensureToken();
     const data = await spotifyApi.getMyCurrentPlaybackState();
@@ -70,17 +96,25 @@ async function checkAndSkip(channel) {
 
     if (progressMs >= targetMs && streamConfig.lastSkippedTrackId !== track.id) {
       streamConfig.lastSkippedTrackId = track.id;
+      streamConfig.skippedCount++;
       await spotifyApi.skipToNext();
 
-      if (channel) {
-        const skipEmbed = new EmbedBuilder()
-          .setColor(BABY_BLUE)
-          .setTitle('⚡ Auto-Salto ♡')
-          .setDescription(`Se saltó automáticamente **${track.name}** de **${track.artists[0].name}**! ♡`)
-          .setThumbnail(track.album.images[0]?.url || null)
-          .setFooter({ text: `Saltado al ${streamConfig.percent}% + ${streamConfig.extraSeconds}s` });
+      if (client) {
+        try {
+          const targetChannel = client.channels.cache.get(TARGET_CHANNEL_ID) || await client.channels.fetch(TARGET_CHANNEL_ID);
+          if (targetChannel) {
+            const skipEmbed = new EmbedBuilder()
+              .setColor(BABY_BLUE)
+              .setTitle('⚡ Auto-Salto ♡')
+              .setDescription(`¡Se saltó automáticamente **${track.name}** de **${track.artists[0].name}**! ♡`)
+              .setThumbnail(track.album.images[0]?.url || null)
+              .setFooter({ text: `Saltado al ${streamConfig.percent}% + ${streamConfig.extraSeconds}s ♡` });
 
-        channel.send({ embeds: [skipEmbed] });
+            targetChannel.send({ embeds: [skipEmbed] });
+          }
+        } catch (err) {
+          console.error('[Spotify] Error al enviar mensaje al canal objetivo:', err.message);
+        }
       }
     }
   } catch (err) {
@@ -101,7 +135,7 @@ module.exports = {
           .setTitle('🎵 Comandos de Spotify ♡')
           .setDescription(`¡Puedes usar tanto \`;\` como \`chi \` como prefijo! ♡`)
           .addFields(
-            { name: '🟢 Modo Stream ♡', value: `\`${prefix}stream\` - Activa el modo stream por defecto (**50% + 5s**)\n\`${prefix}stream 60 10\` - Ajusta porcentaje y segundos\n\`${prefix}stream off\` - Desactiva el modo stream` },
+            { name: '🟢 Modo Stream ♡', value: `\`${prefix}stream\` - Activa o desactiva el modo stream (**50% + 5s**)\n\`${prefix}stream 60 10\` - Ajusta porcentaje y segundos` },
             { name: '▶️ Controles de Reproducción ♡', value: `\`${prefix}play [canción]\` o \`${prefix}sp [canción]\` - Buscar y poner canción\n\`${prefix}pause\` - Pausar música\n\`${prefix}play\` - Reanudar música\n\`${prefix}skip\` - Saltar canción\n\`${prefix}stop\` - Detener música y apagar modo stream` }
           )
           .setFooter({ text: 'Spotify Premium Conectado ♡' });
@@ -113,7 +147,12 @@ module.exports = {
       if (commandName === 'stream') {
         const option = args[0]?.toLowerCase();
 
-        if (option === 'off' || option === 'stop') {
+        // SI YA ESTÁ ENCENDIDO -> APAGAR (TOGGLE)
+        if (streamConfig.enabled || option === 'off' || option === 'stop') {
+          const durationMs = Date.now() - (streamConfig.startTime || Date.now());
+          const formattedTime = formatTime(durationMs);
+          const songsCount = streamConfig.skippedCount;
+
           streamConfig.enabled = false;
           if (pollInterval) clearInterval(pollInterval);
           pollInterval = null;
@@ -122,23 +161,26 @@ module.exports = {
           const offEmbed = new EmbedBuilder()
             .setColor(BABY_BLUE)
             .setTitle('🔴 Modo Stream ♡')
-            .setDescription('chi stream ♡ mode: **OFF**\n\nLas canciones se reproducirán normalmente.');
+            .setDescription(`chi stream ♡ mode: **OFF**\n\n¡Sintonía finalizada! ♡\nTransmitiste **${songsCount} ${songsCount === 1 ? 'canción' : 'canciones'}** durante ${formattedTime}.`)
+            .setFooter({ text: 'Las canciones se reproducirán normalmente ♡' });
 
           return message.reply({ embeds: [offEmbed] });
         }
 
+        // SI ESTÁ APAGADO -> ENCENDER
         const percent = Number(args[0]) || 50;
         const seconds = Number(args[1]) || 5;
 
         streamConfig.enabled = true;
         streamConfig.percent = percent;
         streamConfig.extraSeconds = seconds;
+        streamConfig.startTime = Date.now();
+        streamConfig.skippedCount = 0;
 
         if (!pollInterval) {
-          pollInterval = setInterval(() => checkAndSkip(message.channel), 2500);
+          pollInterval = setInterval(() => checkAndSkip(message.client), 2500);
         }
 
-        // Obtener la canción que está sonando en este instante
         let currentlyPlayingText = 'Ninguna canción en reproducción';
         let thumbnailUrl = null;
 
@@ -162,7 +204,7 @@ module.exports = {
             { name: 'Segundos extra', value: `+${seconds}s`, inline: true }
           )
           .setThumbnail(thumbnailUrl)
-          .setFooter({ text: `Usa ${prefix}stream off para desactivar ♡` });
+          .setFooter({ text: `Usa ${prefix}stream otra vez para desactivar ♡` });
 
         return message.reply({ embeds: [streamEmbed] });
       }
