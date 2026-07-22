@@ -6,6 +6,9 @@ const BABY_BLUE = '#89CFF0';
 const TARGET_CHANNEL_ID = '1528987534506594414';
 const LOVABLE_API_URL = 'https://chidoris.lovable.app/api/public/spotify/token';
 
+// Caché de tokens en memoria (userId -> { token, expiresAt })
+const tokenCache = new Map();
+
 // Estado del Modo Stream
 let streamConfig = {
   enabled: false,
@@ -20,8 +23,18 @@ let streamConfig = {
 
 let pollInterval = null;
 
-// Obtener la instancia de Spotify API con el token del usuario desde Lovable
-async function getSpotifyApiForUser(discordUserId) {
+// Obtener la instancia de Spotify API usando caché para no saturar Lovable
+async function getSpotifyApiForUser(discordUserId, forceRefresh = false) {
+  const now = Date.now();
+  const cached = tokenCache.get(discordUserId);
+
+  // Si tenemos token guardado y no ha expirado, lo usamos directo
+  if (!forceRefresh && cached && cached.expiresAt > now) {
+    const spotifyApi = new SpotifyWebApi();
+    spotifyApi.setAccessToken(cached.token);
+    return { api: spotifyApi };
+  }
+
   try {
     const response = await fetch(`${LOVABLE_API_URL}?discord_user_id=${discordUserId}`);
 
@@ -34,8 +47,22 @@ async function getSpotifyApiForUser(discordUserId) {
     }
 
     const data = await response.json();
+    const token = data.access_token || data.accessToken;
+
+    if (!token) {
+      console.error('[Spotify] Respuesta de API sin token válido:', data);
+      return { error: 'no_token' };
+    }
+
+    // Guardar en caché por 50 minutos (3000 segundos)
+    const expiresInMs = ((data.expires_in || 3600) - 600) * 1000;
+    tokenCache.set(discordUserId, {
+      token: token,
+      expiresAt: now + expiresInMs
+    });
+
     const spotifyApi = new SpotifyWebApi();
-    spotifyApi.setAccessToken(data.access_token);
+    spotifyApi.setAccessToken(token);
     return { api: spotifyApi };
   } catch (err) {
     console.error('[Spotify Token Fetch Error]:', err.message);
@@ -64,13 +91,26 @@ function formatTime(ms) {
 async function checkAndSkip(client) {
   if (!streamConfig.enabled || !streamConfig.userId) return;
 
-  const userRes = await getSpotifyApiForUser(streamConfig.userId);
+  let userRes = await getSpotifyApiForUser(streamConfig.userId);
   if (userRes.error) return;
 
-  const spotifyApi = userRes.api;
+  let spotifyApi = userRes.api;
 
   try {
-    const data = await spotifyApi.getMyCurrentPlaybackState();
+    let data;
+    try {
+      data = await spotifyApi.getMyCurrentPlaybackState();
+    } catch (apiErr) {
+      // Si el token expiró antes de tiempo, forzamos recarga
+      if (apiErr.message.includes('Access token') || apiErr.statusCode === 401) {
+        userRes = await getSpotifyApiForUser(streamConfig.userId, true);
+        if (userRes.error) return;
+        spotifyApi = userRes.api;
+        data = await spotifyApi.getMyCurrentPlaybackState();
+      } else {
+        throw apiErr;
+      }
+    }
 
     if (!data.body || !data.body.is_playing || !data.body.item) return;
 
@@ -133,7 +173,7 @@ module.exports = {
   async execute(message, parsedCommand) {
     const { commandName, args, prefix } = parsedCommand;
 
-    // --- COMANDO HELP (Disponible siempre sin consultar token) ---
+    // --- COMANDO HELP ---
     if (commandName === 'help') {
       const helpEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
@@ -162,7 +202,6 @@ module.exports = {
       return message.reply({ embeds: [unlinkedEmbed] });
     }
 
-    // Error de conexión con el servidor
     if (userRes.error) {
       const errorEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
