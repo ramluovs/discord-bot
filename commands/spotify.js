@@ -52,7 +52,7 @@ async function getSpotifyApiForUser(discordUserId, forceRefresh = false) {
     spotifyApi.setAccessToken(token);
     return { api: spotifyApi };
   } catch (err) {
-    console.error('[Spotify Token Fetch Error]:', err.message);
+    console.error('[Spotify Token Fetch Error]:', err.message || err);
     return { error: 'network_error' };
   }
 }
@@ -80,7 +80,15 @@ async function checkAndSkipForUser(client, userId) {
   if (!userStream) return;
 
   let userRes = await getSpotifyApiForUser(userId);
-  if (userRes.error) return;
+  if (userRes.error) {
+    userStream.consecutiveErrors = (userStream.consecutiveErrors || 0) + 1;
+    if (userStream.consecutiveErrors >= 5) {
+      console.log(`[Spotify Stream] Deteniendo stream para ${userId} por errores continuos.`);
+      clearInterval(userStream.intervalId);
+      activeStreams.delete(userId);
+    }
+    return;
+  }
 
   let spotifyApi = userRes.api;
 
@@ -89,7 +97,8 @@ async function checkAndSkipForUser(client, userId) {
     try {
       data = await spotifyApi.getMyCurrentPlaybackState();
     } catch (apiErr) {
-      if (apiErr.message.includes('Access token') || apiErr.statusCode === 401) {
+      const msg = apiErr.message || '';
+      if (msg.includes('Access token') || apiErr.statusCode === 401) {
         userRes = await getSpotifyApiForUser(userId, true);
         if (userRes.error) return;
         spotifyApi = userRes.api;
@@ -98,6 +107,9 @@ async function checkAndSkipForUser(client, userId) {
         throw apiErr;
       }
     }
+
+    // Si todo va bien, reiniciamos el contador de errores
+    userStream.consecutiveErrors = 0;
 
     if (!data.body || !data.body.is_playing || !data.body.item) return;
 
@@ -123,10 +135,10 @@ async function checkAndSkipForUser(client, userId) {
           newTrack = newPlayback.body.item;
         }
       } catch (e) {
-        console.error('Error al obtener la nueva canción:', e.message);
+        console.error('Error al obtener la nueva canción:', e.message || e);
       }
 
-      // Notificar si el usuario tiene las notificaciones activadas
+      // Notificar si las notificaciones están activadas
       if (userStream.notifyOnSkip && client) {
         try {
           const targetChannel = client.channels.cache.get(TARGET_CHANNEL_ID) || await client.channels.fetch(TARGET_CHANNEL_ID);
@@ -146,12 +158,21 @@ async function checkAndSkipForUser(client, userId) {
             targetChannel.send({ embeds: [skipEmbed] });
           }
         } catch (err) {
-          console.error('[Spotify] Error enviando mensaje al canal:', err.message);
+          console.error('[Spotify] Error enviando mensaje al canal:', err.message || err);
         }
       }
     }
   } catch (err) {
-    console.error('[Spotify Stream Error]:', err.message);
+    userStream.consecutiveErrors = (userStream.consecutiveErrors || 0) + 1;
+    const errorDetails = err.message || (err.body && err.body.error && err.body.error.message) || String(err);
+    console.error(`[Spotify Stream Error - User ${userId}]:`, errorDetails);
+
+    // Si se acumulan 5 errores seguidos (ej. Spotify cerrado, sin Premium, etc.), detiene el stream de ese usuario
+    if (userStream.consecutiveErrors >= 5) {
+      console.log(`[Spotify Stream] Deteniendo automáticamente el Modo Stream para <@${userId}> tras 5 errores consecutivos.`);
+      clearInterval(userStream.intervalId);
+      activeStreams.delete(userId);
+    }
   }
 }
 
@@ -206,7 +227,7 @@ module.exports = {
         const option = args[0]?.toLowerCase();
         const userStream = activeStreams.get(userId);
 
-        // SI YA TIENE UN STREAM ACTIVO Y PONE ;stream O ;stream off / ;stream stop
+        // APAGAR STREAM
         if (userStream && (option === 'off' || option === 'stop' || !args[0] || !isNaN(args[0]))) {
           clearInterval(userStream.intervalId);
 
@@ -225,11 +246,10 @@ module.exports = {
           return message.reply({ embeds: [offEmbed] });
         }
 
-        // ENCENDER STREAM PARA ESTE USUARIO
+        // ENCENDER STREAM
         const percent = Number(args[0]) || 50;
         const seconds = Number(args[1]) || 5;
 
-        // Crear un intervalo propio para esta persona
         const intervalId = setInterval(() => checkAndSkipForUser(message.client, userId), 2500);
 
         const newStreamConfig = {
@@ -239,6 +259,7 @@ module.exports = {
           startTime: Date.now(),
           skippedCount: 0,
           notifyOnSkip: true,
+          consecutiveErrors: 0,
           intervalId
         };
 
@@ -255,7 +276,7 @@ module.exports = {
             thumbnailUrl = currentTrack.album.images[0]?.url || null;
           }
         } catch (e) {
-          console.error('Error al obtener canción actual:', e.message);
+          console.error('Error al obtener canción actual:', e.message || e);
         }
 
         const streamEmbed = new EmbedBuilder()
@@ -337,7 +358,7 @@ module.exports = {
             try {
               await replyMsg.edit({ embeds: [expiredEmbed], components: [disabledRow] });
             } catch (err) {
-              console.error('Error al actualizar mensaje expirado:', err.message);
+              console.error('Error al actualizar mensaje expirado:', err.message || err);
             }
           }
         });
@@ -397,7 +418,6 @@ module.exports = {
       if (commandName === 'stop') {
         await spotifyApi.pause();
 
-        // Apagar solo el stream de esta persona si lo tiene activo
         if (activeStreams.has(userId)) {
           const userStream = activeStreams.get(userId);
           clearInterval(userStream.intervalId);
@@ -424,11 +444,11 @@ module.exports = {
       }
 
     } catch (err) {
-      console.error('Error ejecutando comando de Spotify:', err);
+      console.error('Error ejecutando comando de Spotify:', err.message || err);
       const errorEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
         .setTitle('⚠️ Error de Spotify ♡')
-        .setDescription(err.message || '¡Asegúrate de tener Spotify activo en tu dispositivo!');
+        .setDescription(err.message || '¡Asegúrate de tener Spotify activo en tu dispositivo y contar con Spotify Premium!');
 
       return message.reply({ embeds: [errorEmbed] });
     }
