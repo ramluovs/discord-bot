@@ -83,7 +83,7 @@ async function checkAndSkipForUser(client, userId) {
   if (userRes.error) {
     userStream.consecutiveErrors = (userStream.consecutiveErrors || 0) + 1;
     if (userStream.consecutiveErrors >= 5) {
-      console.log(`[Spotify Stream] Deteniendo stream para ${userId} por errores continuos.`);
+      console.log(`[Spotify Stream] Deteniendo stream para ${userId} por errores continuos de token.`);
       clearInterval(userStream.intervalId);
       activeStreams.delete(userId);
     }
@@ -108,7 +108,7 @@ async function checkAndSkipForUser(client, userId) {
       }
     }
 
-    // Si todo va bien, reiniciamos el contador de errores
+    // Reiniciamos contador de errores si la llamada fue exitosa
     userStream.consecutiveErrors = 0;
 
     if (!data.body || !data.body.is_playing || !data.body.item) return;
@@ -135,7 +135,7 @@ async function checkAndSkipForUser(client, userId) {
           newTrack = newPlayback.body.item;
         }
       } catch (e) {
-        console.error('Error al obtener la nueva canción:', e.message || e);
+        console.error('Error al obtener la nueva canción:', e.message || JSON.stringify(e));
       }
 
       // Notificar si las notificaciones están activadas
@@ -158,22 +158,22 @@ async function checkAndSkipForUser(client, userId) {
             targetChannel.send({ embeds: [skipEmbed] });
           }
         } catch (err) {
-          console.error('[Spotify] Error enviando mensaje al canal:', err.message || err);
+          console.error('[Spotify] Error enviando mensaje al canal:', err.message || JSON.stringify(err));
         }
       }
     }
   } catch (err) {
     userStream.consecutiveErrors = (userStream.consecutiveErrors || 0) + 1;
-    const errorDetails = err.message || (err.body && err.body.error && err.body.error.message) || String(err);
-    console.error(`[Spotify Stream Error - User ${userId}]:`, errorDetails);
+    
+    // Formatea el error para revelar el texto exacto en lugar de [object Object]
+    const rawError = err.body ? JSON.stringify(err.body) : (err.message || JSON.stringify(err));
+    console.error(`[Spotify Stream Error - User ${userId}]:`, rawError);
 
-// CÓDIGO NUEVO (Revela el error exacto de Spotify):
-} catch (err) {
-  userStream.consecutiveErrors = (userStream.consecutiveErrors || 0) + 1;
-  
-  // Extrae el mensaje de la API de Spotify sin importar el formato
-  const rawError = err.body ? JSON.stringify(err.body) : (err.message || JSON.stringify(err));
-  console.error(`[Spotify Stream Error - User ${userId}]:`, rawError);
+    // Si acumula 5 errores seguidos, detiene el stream del usuario automáticamente
+    if (userStream.consecutiveErrors >= 5) {
+      console.log(`[Spotify Stream] Deteniendo automáticamente el Modo Stream para <@${userId}> tras 5 errores consecutivos.`);
+      clearInterval(userStream.intervalId);
+      activeStreams.delete(userId);
     }
   }
 }
@@ -224,7 +224,7 @@ module.exports = {
     const spotifyApi = userRes.api;
 
     try {
-      // --- COMANDO STREAM (POR USUARIO) ---
+      // --- COMANDO STREAM ---
       if (commandName === 'stream') {
         const option = args[0]?.toLowerCase();
         const userStream = activeStreams.get(userId);
@@ -278,7 +278,8 @@ module.exports = {
             thumbnailUrl = currentTrack.album.images[0]?.url || null;
           }
         } catch (e) {
-          console.error('Error al obtener canción actual:', e.message || e);
+          const rawError = e.body ? JSON.stringify(e.body) : (e.message || JSON.stringify(e));
+          console.error('Error al obtener canción actual:', rawError);
         }
 
         const streamEmbed = new EmbedBuilder()
@@ -360,7 +361,7 @@ module.exports = {
             try {
               await replyMsg.edit({ embeds: [expiredEmbed], components: [disabledRow] });
             } catch (err) {
-              console.error('Error al actualizar mensaje expirado:', err.message || err);
+              console.error('Error al actualizar mensaje expirado:', err.message || JSON.stringify(err));
             }
           }
         });
@@ -446,7 +447,9 @@ module.exports = {
       }
 
     } catch (err) {
-      console.error('Error ejecutando comando de Spotify:', err.message || err);
+      const rawError = err.body ? JSON.stringify(err.body) : (err.message || JSON.stringify(err));
+      console.error('Error ejecutando comando de Spotify:', rawError);
+
       const errorEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
         .setTitle('⚠️ Error de Spotify ♡')
