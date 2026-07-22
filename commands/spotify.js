@@ -167,11 +167,13 @@ async function checkAndSkipForUser(client, userId) {
     const errorDetails = err.message || (err.body && err.body.error && err.body.error.message) || String(err);
     console.error(`[Spotify Stream Error - User ${userId}]:`, errorDetails);
 
-    // Si se acumulan 5 errores seguidos (ej. Spotify cerrado, sin Premium, etc.), detiene el stream de ese usuario
-    if (userStream.consecutiveErrors >= 5) {
-      console.log(`[Spotify Stream] Deteniendo automáticamente el Modo Stream para <@${userId}> tras 5 errores consecutivos.`);
-      clearInterval(userStream.intervalId);
-      activeStreams.delete(userId);
+// CÓDIGO NUEVO (Revela el error exacto de Spotify):
+} catch (err) {
+  userStream.consecutiveErrors = (userStream.consecutiveErrors || 0) + 1;
+  
+  // Extrae el mensaje de la API de Spotify sin importar el formato
+  const rawError = err.body ? JSON.stringify(err.body) : (err.message || JSON.stringify(err));
+  console.error(`[Spotify Stream Error - User ${userId}]:`, rawError);
     }
   }
 }
