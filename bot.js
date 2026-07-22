@@ -1,155 +1,78 @@
-const {
-  Client,
-  GatewayIntentBits
-} = require('discord.js');
-const ask = require('./commands/ask');
-const cards = require('./commands/cards');
-const convert = require('./commands/media/convert');
-const yt = require('./commands/media/yt');
-const dl = require('./commands/media/dl');
-const ig = require('./commands/media/ig');
-const fun = require('./commands/fun');
-const music = require('./music/music');
-const spotify = require('./commands/spotify');
-const roblox = require('./commands/roblox');
-const versus = require('./commands/moderation/versus');
-const moderationCommands = {
-  ban: require('./commands/moderation/ban'),
-  unban: require('./commands/moderation/unban'),
-  kick: require('./commands/moderation/kick'),
-  timeout: require('./commands/moderation/timeout'),
-  clear: require('./commands/moderation/clear'),
-  setnick: require('./commands/moderation/setnick'),
-  verify: require('./commands/moderation/verify'),
-  v: require('./commands/moderation/verify'),
-  invite: require('./commands/moderation/invite'),
-  invitar: require('./commands/moderation/invite'),
-  versus,
-  versusadd: versus,
-  versusdelete: versus
-};
-
-const CARD_COMMANDS = ['addcard', 'cards', 'quiz', 'stopcard', 'deletecard', 'resetcards'];
-const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks', 'banana', 'moneda', 'flip', 'coin', 'tictactoe'];
-const MEDIA_COMMANDS = ['c', 'yt', 'dl'];
-const MUSIC_COMMANDS = ['musicadd', 'musicdelete', 'musiclist', 'addmusicimage', 'musictrack', 'musicuntrack', 'musictracklist'];
-const SPOTIFY_COMMANDS = ['play', 'pause', 'stop', 'skip', 'stream', 'sp'];
-const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group', 'rs'];
+require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const { Client, GatewayIntentBits, Collection } = require('discord.js');
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.MessageContent
   ]
 });
 
-function parsePrefixedCommand(content) {
-  const trimmedContent = content.trim();
+client.commands = new Collection();
 
-  if (!trimmedContent) return null;
+// Cargador dinámico de comandos desde la carpeta /commands
+const commandsPath = path.join(__dirname, 'commands');
 
-  const matchedPrefix = trimmedContent.startsWith(';')
-    ? ';'
-    : trimmedContent.match(/^chi\s+/i)?.[0];
+if (fs.existsSync(commandsPath)) {
+  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
-  if (!matchedPrefix) return null;
+  for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    const command = require(filePath);
 
-  const body = trimmedContent.slice(matchedPrefix.length).trim();
-
-  if (!body) return null;
-
-  const parts = body.split(/\s+/);
-  return {
-    prefix: matchedPrefix === ';' ? ';' : 'chi ',
-    commandName: parts[0].toLowerCase(),
-    args: parts.slice(1)
-  };
+    if (file === 'spotify.js') {
+      // Registrar todos los subcomandos de Spotify
+      ['help', 'stream', 'play', 'sp', 'pause', 'stop', 'skip'].forEach(cmd => {
+        client.commands.set(cmd, command);
+      });
+    } else if (file === 'ya.js') {
+      // Registrar el comando ;ya o chi ya
+      client.commands.set('ya', command);
+    } else if (command.name) {
+      client.commands.set(command.name, command);
+    }
+  }
 }
 
-// ===== READY =====
 client.once('ready', () => {
-  console.log(`Logged in as ${client.user.tag}`);
-  fun.scheduleBirthdayCheck(client);
-  const { scheduleTracking } = require('./music/tracking');
-  scheduleTracking(client);
+  console.log(`🤖 Bot encendido con éxito como: ${client.user.tag} ♡`);
 });
 
-// ===== MESSAGE HANDLER =====
-client.on('messageCreate', async message => {
+client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  if (message.channel.id === '1500627966713925832' && !message.author.bot) {
-    const { handleAppDownloadRequest } = require('./music/music');
-    handleAppDownloadRequest(message);
-    return;
+  const content = message.content.trim();
+  let prefix = null;
+  let args = [];
+  let commandName = null;
+
+  // Detección de prefijos: "chi " o ";"
+  if (content.toLowerCase().startsWith('chi ')) {
+    prefix = 'chi ';
+    const rawArgs = content.slice(4).trim().split(/ +/);
+    commandName = rawArgs.shift()?.toLowerCase();
+    args = rawArgs;
+  } else if (content.startsWith(';')) {
+    prefix = ';';
+    const rawArgs = content.slice(1).trim().split(/ +/);
+    commandName = rawArgs.shift()?.toLowerCase();
+    args = rawArgs;
   }
 
-  const isReply = Boolean(message.reference?.messageId);
-  const parsedCommand = parsePrefixedCommand(message.content);
+  if (!commandName) return;
 
-  if (!parsedCommand) {
-    if (isReply) {
-      const handledFollowUp = await ask.handleFollowUp(message);
-      if (handledFollowUp) return;
+  const command = client.commands.get(commandName);
+
+  if (command) {
+    try {
+      await command.execute(message, { commandName, args, prefix });
+    } catch (error) {
+      console.error(`Error ejecutando el comando ${commandName}:`, error);
     }
-
-    return;
   }
-
-  if (parsedCommand.prefix === 'chi ' && parsedCommand.commandName === 'ask') {
-    return ask.execute(message);
-  }
-
-  if (moderationCommands[parsedCommand.commandName]) {
-    return moderationCommands[parsedCommand.commandName].execute(message, parsedCommand);
-  }
-
-  if (CARD_COMMANDS.includes(parsedCommand.commandName)) {
-    return cards.execute(message, parsedCommand);
-  }
-
-  if (FUN_COMMANDS.includes(parsedCommand.commandName)) {
-    return fun.execute(message, parsedCommand);
-  }
-
-  if (parsedCommand.commandName === 'c') {
-    return convert.execute(message, parsedCommand);
-  }
-
-  if (parsedCommand.commandName === 'yt') {
-    return yt.execute(message, parsedCommand);
-  }
-
-  if (parsedCommand.commandName === 'dl') {
-    return dl.execute(message, parsedCommand);
-  }
-
-  if (parsedCommand.commandName === 'ig') {
-    return ig.execute(message, parsedCommand);
-  }
-
-  if (MUSIC_COMMANDS.includes(parsedCommand.commandName)) {
-    return music.execute(message, parsedCommand);
-  }
-
-  if (SPOTIFY_COMMANDS.includes(parsedCommand.commandName)) {
-    return spotify.execute(message, parsedCommand);
-  }
-
-  if (ROBLOX_COMMANDS.includes(parsedCommand.commandName)) {
-    return roblox.execute(message, parsedCommand);
-  }
-});
-
-// ===== BUTTON HANDLER =====
-client.on('interactionCreate', async interaction => {
-  const handledAIInteraction = await ask.handleInteraction(interaction);
-  if (handledAIInteraction) return;
-
-  const handledCards = await cards.handleInteraction(interaction);
-  if (handledCards) return;
 });
 
 client.login(process.env.TOKEN);
