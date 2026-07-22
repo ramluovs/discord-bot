@@ -5,8 +5,20 @@ const { EmbedBuilder } = require('discord.js');
 const BABY_BLUE = '#89CFF0';
 const LOVABLE_API_URL = 'https://chidoris.lovable.app/api/public/spotify/token';
 
-// Obtener Spotify API para el usuario desde Lovable
-async function getSpotifyApiForUser(discordUserId) {
+// Caché de tokens en memoria (userId -> { token, expiresAt })
+const tokenCache = new Map();
+
+// Obtener Spotify API para el usuario desde Lovable con soporte para refrescar token
+async function getSpotifyApiForUser(discordUserId, forceRefresh = false) {
+  const now = Date.now();
+  const cached = tokenCache.get(discordUserId);
+
+  if (!forceRefresh && cached && cached.expiresAt > now) {
+    const spotifyApi = new SpotifyWebApi();
+    spotifyApi.setAccessToken(cached.token);
+    return { api: spotifyApi };
+  }
+
   try {
     const response = await fetch(`${LOVABLE_API_URL}?discord_user_id=${discordUserId}`);
 
@@ -25,11 +37,19 @@ async function getSpotifyApiForUser(discordUserId) {
       return { error: 'no_token' };
     }
 
+    // Guardar en caché por 50 minutos
+    const expiresInMs = ((data.expires_in || 3600) - 600) * 1000;
+    tokenCache.set(discordUserId, {
+      token: token,
+      expiresAt: now + expiresInMs
+    });
+
     const spotifyApi = new SpotifyWebApi();
     spotifyApi.setAccessToken(token);
     return { api: spotifyApi };
   } catch (err) {
-    console.error('[Ya Command Token Fetch Error]:', err.message);
+    const rawError = err.body ? JSON.stringify(err.body) : (err.message || JSON.stringify(err));
+    console.error('[Ya Command Token Fetch Error]:', rawError);
     return { error: 'network_error' };
   }
 }
@@ -45,15 +65,17 @@ function formatMs(ms) {
 module.exports = {
   name: 'ya',
   async execute(message, parsedCommand) {
-    // Obtener la sesión de Spotify del usuario que ejecutó el comando
-    const userRes = await getSpotifyApiForUser(message.author.id);
+    const userId = message.author.id;
+
+    // Obtener la sesión de Spotify del usuario
+    let userRes = await getSpotifyApiForUser(userId);
 
     // Si no ha vinculado su cuenta
     if (userRes.error === 'unlinked') {
       const unlinkedEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
         .setTitle('🔗 Vincula tu Spotify ♡')
-        .setDescription(`¡Hola <@${message.author.id}>! Para verificar si tu canción ya cuenta como stream, primero debes vincular tu cuenta.\n\n👉 **Ingresa aquí:**\nhttps://chidoris.lovable.app`)
+        .setDescription(`¡Hola <@${userId}>! Para verificar si tu canción ya cuenta como stream, primero debes vincular tu cuenta.\n\n👉 **Ingresa aquí:**\nhttps://chidoris.lovable.app`)
         .setFooter({ text: 'Coloca tu ID de Discord y presiona Conectar Spotify ♡' });
 
       return message.reply({ embeds: [unlinkedEmbed] });
@@ -68,10 +90,24 @@ module.exports = {
       return message.reply({ embeds: [errorEmbed] });
     }
 
-    const spotifyApi = userRes.api;
+    let spotifyApi = userRes.api;
 
     try {
-      const playback = await spotifyApi.getMyCurrentPlaybackState();
+      let playback;
+      try {
+        playback = await spotifyApi.getMyCurrentPlaybackState();
+      } catch (apiErr) {
+        const msg = apiErr.message || '';
+        // Si el token expiró, forzar refresco del token
+        if (msg.includes('Access token') || apiErr.statusCode === 401) {
+          userRes = await getSpotifyApiForUser(userId, true);
+          if (userRes.error) throw apiErr;
+          spotifyApi = userRes.api;
+          playback = await spotifyApi.getMyCurrentPlaybackState();
+        } else {
+          throw apiErr;
+        }
+      }
 
       // Si no hay música sonando
       if (!playback.body || !playback.body.is_playing || !playback.body.item) {
@@ -79,7 +115,7 @@ module.exports = {
           .setColor(BABY_BLUE)
           .setTitle('🎧 Nada en Reproducción ♡')
           .setDescription('No estás escuchando ninguna canción en Spotify en este momento.')
-          .setFooter({ text: 'Pon una canción en Spotify y vuelve a intentar ♡' });
+          .setFooter({ text: 'Asegúrate de poner una canción en Spotify y vuelve a intentar ♡' });
 
         return message.reply({ embeds: [noMusicEmbed] });
       }
@@ -127,11 +163,13 @@ module.exports = {
         return message.reply({ embeds: [waitEmbed] });
       }
     } catch (err) {
-      console.error('[Ya Command Error]:', err.message);
+      const rawError = err.body ? JSON.stringify(err.body) : (err.message || JSON.stringify(err));
+      console.error(`[Ya Command Error - User ${userId}]:`, rawError);
+
       const errorEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
         .setTitle('⚠️ Error ♡')
-        .setDescription('Ocurrió un problema al consultar tu reproducción en Spotify.');
+        .setDescription('Ocurrió un problema al consultar tu reproducción en Spotify. Asegúrate de tener Spotify encendido y reproduciendo música.');
 
       return message.reply({ embeds: [errorEmbed] });
     }
