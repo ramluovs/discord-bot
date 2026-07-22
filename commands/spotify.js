@@ -4,17 +4,12 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 // Configuración
 const BABY_BLUE = '#89CFF0';
 const TARGET_CHANNEL_ID = '1528987534506594414';
-const AUTHORIZED_USER_ID = '425825170205179906';
-
-const spotifyApi = new SpotifyWebApi({
-  clientId: process.env.SPOTIFY_CLIENT_ID,
-  clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-  refreshToken: process.env.SPOTIFY_REFRESH_TOKEN
-});
+const LOVABLE_API_URL = 'https://chidoris.lovable.app/api/public/spotify/token';
 
 // Estado del Modo Stream
 let streamConfig = {
   enabled: false,
+  userId: null,
   percent: 50,
   extraSeconds: 5,
   lastSkippedTrackId: null,
@@ -25,12 +20,26 @@ let streamConfig = {
 
 let pollInterval = null;
 
-async function ensureToken() {
+// Obtener la instancia de Spotify API con el token del usuario desde Lovable
+async function getSpotifyApiForUser(discordUserId) {
   try {
-    const data = await spotifyApi.refreshAccessToken();
-    spotifyApi.setAccessToken(data.body['access_token']);
+    const response = await fetch(`${LOVABLE_API_URL}?discord_user_id=${discordUserId}`);
+
+    if (response.status === 404) {
+      return { error: 'unlinked' };
+    }
+
+    if (!response.ok) {
+      return { error: 'api_error' };
+    }
+
+    const data = await response.json();
+    const spotifyApi = new SpotifyWebApi();
+    spotifyApi.setAccessToken(data.access_token);
+    return { api: spotifyApi };
   } catch (err) {
-    console.error('[Spotify] Error actualizando token:', err.message);
+    console.error('[Spotify Token Fetch Error]:', err.message);
+    return { error: 'network_error' };
   }
 }
 
@@ -53,8 +62,14 @@ function formatTime(ms) {
 
 // Comprobador en segundo plano para el Modo Stream
 async function checkAndSkip(client) {
+  if (!streamConfig.enabled || !streamConfig.userId) return;
+
+  const userRes = await getSpotifyApiForUser(streamConfig.userId);
+  if (userRes.error) return;
+
+  const spotifyApi = userRes.api;
+
   try {
-    await ensureToken();
     const data = await spotifyApi.getMyCurrentPlaybackState();
 
     if (!data.body || !data.body.is_playing || !data.body.item) return;
@@ -118,35 +133,48 @@ module.exports = {
   async execute(message, parsedCommand) {
     const { commandName, args, prefix } = parsedCommand;
 
-    // Verificar si es el usuario autorizado
-    if (message.author.id !== AUTHORIZED_USER_ID) {
-      const unauthorizedEmbed = new EmbedBuilder()
+    // --- COMANDO HELP (Disponible siempre sin consultar token) ---
+    if (commandName === 'help') {
+      const helpEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
-        .setTitle('🔒 Solo el Dueño ♡')
-        .setDescription(`Lo siento, <@${message.author.id}>. Por ahora los comandos de Spotify están reservados únicamente para mi creador/a ♡`)
-        .setFooter({ text: 'Próximamente disponible para todos ♡' });
+        .setTitle('🎵 Comandos de Spotify ♡')
+        .setDescription(`¡Puedes usar tanto \`;\` como \`chi \` como prefijo! ♡`)
+        .addFields(
+          { name: '🟢 Modo Stream ♡', value: `\`${prefix}stream\` - Activa o desactiva tu modo stream (**50% + 5s**)\n\`${prefix}stream 60 10\` - Ajusta porcentaje y segundos` },
+          { name: '▶️ Controles de Reproducción ♡', value: `\`${prefix}play [canción]\` o \`${prefix}sp [canción]\` - Buscar y poner canción\n\`${prefix}pause\` - Pausar música\n\`${prefix}play\` - Reanudar música\n\`${prefix}skip\` - Saltar canción\n\`${prefix}stop\` - Detener música y apagar modo stream` }
+        )
+        .setFooter({ text: 'Spotify Conectado ♡' });
 
-      return message.reply({ embeds: [unauthorizedEmbed] });
+      return message.reply({ embeds: [helpEmbed] });
     }
 
-    await ensureToken();
+    // Obtener la instancia de Spotify para el usuario de Discord
+    const userRes = await getSpotifyApiForUser(message.author.id);
+
+    // Si la cuenta no está vinculada en Lovable
+    if (userRes.error === 'unlinked') {
+      const unlinkedEmbed = new EmbedBuilder()
+        .setColor(BABY_BLUE)
+        .setTitle('🔗 Vincula tu Spotify ♡')
+        .setDescription(`¡Hola <@${message.author.id}>! Para usar los comandos de Spotify, primero debes vincular tu cuenta.\n\n👉 **Ingresa aquí:**\nhttps://chidoris.lovable.app`)
+        .setFooter({ text: 'Coloca tu ID de Discord y presiona Conectar Spotify ♡' });
+
+      return message.reply({ embeds: [unlinkedEmbed] });
+    }
+
+    // Error de conexión con el servidor
+    if (userRes.error) {
+      const errorEmbed = new EmbedBuilder()
+        .setColor(BABY_BLUE)
+        .setTitle('⚠️ Error de Autenticación ♡')
+        .setDescription('No se pudo verificar tu cuenta con el servidor. Intenta de nuevo más tarde.');
+
+      return message.reply({ embeds: [errorEmbed] });
+    }
+
+    const spotifyApi = userRes.api;
 
     try {
-      // --- COMANDO HELP ---
-      if (commandName === 'help') {
-        const helpEmbed = new EmbedBuilder()
-          .setColor(BABY_BLUE)
-          .setTitle('🎵 Comandos de Spotify ♡')
-          .setDescription(`¡Puedes usar tanto \`;\` como \`chi \` como prefijo! ♡`)
-          .addFields(
-            { name: '🟢 Modo Stream ♡', value: `\`${prefix}stream\` - Activa o desactiva tu modo stream (**50% + 5s**)\n\`${prefix}stream 60 10\` - Ajusta porcentaje y segundos` },
-            { name: '▶️ Controles de Reproducción ♡', value: `\`${prefix}play [canción]\` o \`${prefix}sp [canción]\` - Buscar y poner canción\n\`${prefix}pause\` - Pausar música\n\`${prefix}play\` - Reanudar música\n\`${prefix}skip\` - Saltar canción\n\`${prefix}stop\` - Detener música y apagar modo stream` }
-          )
-          .setFooter({ text: 'Spotify Premium Conectado ♡' });
-
-        return message.reply({ embeds: [helpEmbed] });
-      }
-
       // --- COMANDO STREAM (TOGGLE) ---
       if (commandName === 'stream') {
         const option = args[0]?.toLowerCase();
@@ -158,6 +186,7 @@ module.exports = {
           const songsCount = streamConfig.skippedCount;
 
           streamConfig.enabled = false;
+          streamConfig.userId = null;
           if (pollInterval) clearInterval(pollInterval);
           pollInterval = null;
           streamConfig.lastSkippedTrackId = null;
@@ -176,11 +205,12 @@ module.exports = {
         const seconds = Number(args[1]) || 5;
 
         streamConfig.enabled = true;
+        streamConfig.userId = message.author.id;
         streamConfig.percent = percent;
         streamConfig.extraSeconds = seconds;
         streamConfig.startTime = Date.now();
         streamConfig.skippedCount = 0;
-        streamConfig.notifyOnSkip = true; // Por defecto envía mensajes
+        streamConfig.notifyOnSkip = true;
 
         if (!pollInterval) {
           pollInterval = setInterval(() => checkAndSkip(message.client), 2500);
@@ -211,7 +241,6 @@ module.exports = {
           .setThumbnail(thumbnailUrl)
           .setFooter({ text: `Responde en 30s ♡` });
 
-        // Botones de selección
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId('stream_notify_yes')
@@ -225,7 +254,6 @@ module.exports = {
 
         const replyMsg = await message.reply({ embeds: [streamEmbed], components: [row] });
 
-        // Collector de botones (30 segundos)
         const filter = i => i.user.id === message.author.id;
         const collector = replyMsg.createMessageComponentCollector({ filter, time: 30000 });
 
@@ -258,7 +286,6 @@ module.exports = {
 
         collector.on('end', async (collected, reason) => {
           if (reason === 'time' && collected.size === 0) {
-            // Pasaron 30 segundos sin tocar nada: se mantiene activado por defecto
             streamConfig.notifyOnSkip = true;
 
             const disabledRow = new ActionRowBuilder().addComponents(
@@ -340,6 +367,7 @@ module.exports = {
       if (commandName === 'stop') {
         await spotifyApi.pause();
         streamConfig.enabled = false;
+        streamConfig.userId = null;
         if (pollInterval) clearInterval(pollInterval);
         pollInterval = null;
 
@@ -367,7 +395,7 @@ module.exports = {
       const errorEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
         .setTitle('⚠️ Error de Spotify ♡')
-        .setDescription(err.message || '¡Asegúrate de que Spotify esté activo en tu dispositivo!');
+        .setDescription(err.message || '¡Asegúrate de tener Spotify activo en tu dispositivo!');
 
       return message.reply({ embeds: [errorEmbed] });
     }
