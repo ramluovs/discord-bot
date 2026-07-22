@@ -1,7 +1,7 @@
 const SpotifyWebApi = require('spotify-web-api-node');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
-// Configuración
+// Configuración de estilo y API
 const BABY_BLUE = '#89CFF0';
 const TARGET_CHANNEL_ID = '1528987534506594414';
 const LOVABLE_API_URL = 'https://chidoris.lovable.app/api/public/spotify/token';
@@ -9,26 +9,14 @@ const LOVABLE_API_URL = 'https://chidoris.lovable.app/api/public/spotify/token';
 // Caché de tokens en memoria (userId -> { token, expiresAt })
 const tokenCache = new Map();
 
-// Estado del Modo Stream
-let streamConfig = {
-  enabled: false,
-  userId: null,
-  percent: 50,
-  extraSeconds: 5,
-  lastSkippedTrackId: null,
-  startTime: null,
-  skippedCount: 0,
-  notifyOnSkip: true
-};
+// Estado del Modo Stream INDEPENDIENTE POR USUARIO (userId -> config)
+const activeStreams = new Map();
 
-let pollInterval = null;
-
-// Obtener la instancia de Spotify API usando caché para no saturar Lovable
+// Obtener la instancia de Spotify API usando caché para cada usuario
 async function getSpotifyApiForUser(discordUserId, forceRefresh = false) {
   const now = Date.now();
   const cached = tokenCache.get(discordUserId);
 
-  // Si tenemos token guardado y no ha expirado, lo usamos directo
   if (!forceRefresh && cached && cached.expiresAt > now) {
     const spotifyApi = new SpotifyWebApi();
     spotifyApi.setAccessToken(cached.token);
@@ -50,11 +38,10 @@ async function getSpotifyApiForUser(discordUserId, forceRefresh = false) {
     const token = data.access_token || data.accessToken;
 
     if (!token) {
-      console.error('[Spotify] Respuesta de API sin token válido:', data);
       return { error: 'no_token' };
     }
 
-    // Guardar en caché por 50 minutos (3000 segundos)
+    // Guardar en caché por 50 minutos
     const expiresInMs = ((data.expires_in || 3600) - 600) * 1000;
     tokenCache.set(discordUserId, {
       token: token,
@@ -87,11 +74,12 @@ function formatTime(ms) {
   return `${parts[0]}, ${parts[1]} y ${parts[2]}`;
 }
 
-// Comprobador en segundo plano para el Modo Stream
-async function checkAndSkip(client) {
-  if (!streamConfig.enabled || !streamConfig.userId) return;
+// Comprobador individual por usuario para el Modo Stream
+async function checkAndSkipForUser(client, userId) {
+  const userStream = activeStreams.get(userId);
+  if (!userStream) return;
 
-  let userRes = await getSpotifyApiForUser(streamConfig.userId);
+  let userRes = await getSpotifyApiForUser(userId);
   if (userRes.error) return;
 
   let spotifyApi = userRes.api;
@@ -101,9 +89,8 @@ async function checkAndSkip(client) {
     try {
       data = await spotifyApi.getMyCurrentPlaybackState();
     } catch (apiErr) {
-      // Si el token expiró antes de tiempo, forzamos recarga
       if (apiErr.message.includes('Access token') || apiErr.statusCode === 401) {
-        userRes = await getSpotifyApiForUser(streamConfig.userId, true);
+        userRes = await getSpotifyApiForUser(userId, true);
         if (userRes.error) return;
         spotifyApi = userRes.api;
         data = await spotifyApi.getMyCurrentPlaybackState();
@@ -118,16 +105,15 @@ async function checkAndSkip(client) {
     const progressMs = data.body.progress_ms;
     const durationMs = oldTrack.duration_ms;
 
-    const targetMs = (durationMs * (streamConfig.percent / 100)) + (streamConfig.extraSeconds * 1000);
+    const targetMs = (durationMs * (userStream.percent / 100)) + (userStream.extraSeconds * 1000);
 
-    if (progressMs >= targetMs && streamConfig.lastSkippedTrackId !== oldTrack.id) {
-      streamConfig.lastSkippedTrackId = oldTrack.id;
-      streamConfig.skippedCount++;
+    if (progressMs >= targetMs && userStream.lastSkippedTrackId !== oldTrack.id) {
+      userStream.lastSkippedTrackId = oldTrack.id;
+      userStream.skippedCount++;
 
-      // Saltar a la siguiente canción
+      // Saltar canción
       await spotifyApi.skipToNext();
 
-      // Esperar un momento breve para obtener la nueva canción
       await new Promise(resolve => setTimeout(resolve, 800));
 
       let newTrack = null;
@@ -140,12 +126,12 @@ async function checkAndSkip(client) {
         console.error('Error al obtener la nueva canción:', e.message);
       }
 
-      // Solo enviar mensaje si la notificación está activada
-      if (streamConfig.notifyOnSkip && client) {
+      // Notificar si el usuario tiene las notificaciones activadas
+      if (userStream.notifyOnSkip && client) {
         try {
           const targetChannel = client.channels.cache.get(TARGET_CHANNEL_ID) || await client.channels.fetch(TARGET_CHANNEL_ID);
           if (targetChannel) {
-            let descriptionText = `Se saltó **${oldTrack.name}** de **${oldTrack.artists[0].name}**`;
+            let descriptionText = `<@${userId}> saltó **${oldTrack.name}** de **${oldTrack.artists[0].name}**`;
             if (newTrack) {
               descriptionText += ` a **${newTrack.name}** de **${newTrack.artists[0].name}**`;
             }
@@ -155,7 +141,7 @@ async function checkAndSkip(client) {
               .setTitle('⚡ Auto-Salto ♡')
               .setDescription(descriptionText)
               .setThumbnail(newTrack?.album?.images[0]?.url || oldTrack.album?.images[0]?.url || null)
-              .setFooter({ text: `Saltado al ${streamConfig.percent}% + ${streamConfig.extraSeconds}s ♡` });
+              .setFooter({ text: `Saltado al ${userStream.percent}% + ${userStream.extraSeconds}s ♡` });
 
             targetChannel.send({ embeds: [skipEmbed] });
           }
@@ -172,6 +158,7 @@ async function checkAndSkip(client) {
 module.exports = {
   async execute(message, parsedCommand) {
     const { commandName, args, prefix } = parsedCommand;
+    const userId = message.author.id;
 
     // --- COMANDO HELP ---
     if (commandName === 'help') {
@@ -180,23 +167,23 @@ module.exports = {
         .setTitle('🎵 Comandos de Spotify ♡')
         .setDescription(`¡Puedes usar tanto \`;\` como \`chi \` como prefijo! ♡`)
         .addFields(
-          { name: '🟢 Modo Stream ♡', value: `\`${prefix}stream\` - Activa o desactiva tu modo stream (**50% + 5s**)\n\`${prefix}stream 60 10\` - Ajusta porcentaje y segundos` },
-          { name: '▶️ Controles de Reproducción ♡', value: `\`${prefix}play [canción]\` o \`${prefix}sp [canción]\` - Buscar y poner canción\n\`${prefix}pause\` - Pausar música\n\`${prefix}play\` - Reanudar música\n\`${prefix}skip\` - Saltar canción\n\`${prefix}stop\` - Detener música y apagar modo stream` }
+          { name: '🟢 Modo Stream ♡', value: `\`${prefix}stream\` - Activa o desactiva tu modo stream personal (**50% + 5s**)\n\`${prefix}stream 60 10\` - Ajusta tu porcentaje y segundos` },
+          { name: '▶️ Controles de Reproducción ♡', value: `\`${prefix}play [canción]\` o \`${prefix}sp [canción]\` - Buscar y poner canción\n\`${prefix}pause\` - Pausar música\n\`${prefix}play\` - Reanudar música\n\`${prefix}skip\` - Saltar canción\n\`${prefix}stop\` - Detener música y apagar tu modo stream` }
         )
         .setFooter({ text: 'Spotify Conectado ♡' });
 
       return message.reply({ embeds: [helpEmbed] });
     }
 
-    // Obtener la instancia de Spotify para el usuario de Discord
-    const userRes = await getSpotifyApiForUser(message.author.id);
+    // Obtener la instancia de Spotify para este usuario
+    const userRes = await getSpotifyApiForUser(userId);
 
-    // Si la cuenta no está vinculada en Lovable
+    // Si la cuenta no está vinculada
     if (userRes.error === 'unlinked') {
       const unlinkedEmbed = new EmbedBuilder()
         .setColor(BABY_BLUE)
         .setTitle('🔗 Vincula tu Spotify ♡')
-        .setDescription(`¡Hola <@${message.author.id}>! Para usar los comandos de Spotify, primero debes vincular tu cuenta.\n\n👉 **Ingresa aquí:**\nhttps://chidoris.lovable.app`)
+        .setDescription(`¡Hola <@${userId}>! Para usar los comandos de Spotify, primero debes vincular tu cuenta.\n\n👉 **Ingresa aquí:**\nhttps://chidoris.lovable.app`)
         .setFooter({ text: 'Coloca tu ID de Discord y presiona Conectar Spotify ♡' });
 
       return message.reply({ embeds: [unlinkedEmbed] });
@@ -214,46 +201,48 @@ module.exports = {
     const spotifyApi = userRes.api;
 
     try {
-      // --- COMANDO STREAM (TOGGLE) ---
+      // --- COMANDO STREAM (POR USUARIO) ---
       if (commandName === 'stream') {
         const option = args[0]?.toLowerCase();
+        const userStream = activeStreams.get(userId);
 
-        // APAGAR STREAM
-        if (streamConfig.enabled || option === 'off' || option === 'stop') {
-          const durationMs = Date.now() - (streamConfig.startTime || Date.now());
+        // SI YA TIENE UN STREAM ACTIVO Y PONE ;stream O ;stream off / ;stream stop
+        if (userStream && (option === 'off' || option === 'stop' || !args[0] || !isNaN(args[0]))) {
+          clearInterval(userStream.intervalId);
+
+          const durationMs = Date.now() - userStream.startTime;
           const formattedTime = formatTime(durationMs);
-          const songsCount = streamConfig.skippedCount;
+          const songsCount = userStream.skippedCount;
 
-          streamConfig.enabled = false;
-          streamConfig.userId = null;
-          if (pollInterval) clearInterval(pollInterval);
-          pollInterval = null;
-          streamConfig.lastSkippedTrackId = null;
+          activeStreams.delete(userId);
 
           const offEmbed = new EmbedBuilder()
             .setColor(BABY_BLUE)
             .setTitle('🔴 Modo Stream ♡')
-            .setDescription(`chi stream ♡ modo: **APAGADO**\n\n¡Sintonía finalizada! ♡\nTransmitiste **${songsCount} ${songsCount === 1 ? 'canción' : 'canciones'}** durante ${formattedTime}.`)
-            .setFooter({ text: 'Las canciones se reproducirán normalmente ♡' });
+            .setDescription(`chi stream ♡ modo: **APAGADO**\n\n¡Sintonía finalizada para <@${userId}>! ♡\nTransmitiste **${songsCount} ${songsCount === 1 ? 'canción' : 'canciones'}** durante ${formattedTime}.`)
+            .setFooter({ text: 'Tus canciones se reproducirán normalmente ♡' });
 
           return message.reply({ embeds: [offEmbed] });
         }
 
-        // ENCENDER STREAM
+        // ENCENDER STREAM PARA ESTE USUARIO
         const percent = Number(args[0]) || 50;
         const seconds = Number(args[1]) || 5;
 
-        streamConfig.enabled = true;
-        streamConfig.userId = message.author.id;
-        streamConfig.percent = percent;
-        streamConfig.extraSeconds = seconds;
-        streamConfig.startTime = Date.now();
-        streamConfig.skippedCount = 0;
-        streamConfig.notifyOnSkip = true;
+        // Crear un intervalo propio para esta persona
+        const intervalId = setInterval(() => checkAndSkipForUser(message.client, userId), 2500);
 
-        if (!pollInterval) {
-          pollInterval = setInterval(() => checkAndSkip(message.client), 2500);
-        }
+        const newStreamConfig = {
+          percent,
+          extraSeconds: seconds,
+          lastSkippedTrackId: null,
+          startTime: Date.now(),
+          skippedCount: 0,
+          notifyOnSkip: true,
+          intervalId
+        };
+
+        activeStreams.set(userId, newStreamConfig);
 
         let currentlyPlayingText = 'Ninguna canción en reproducción';
         let thumbnailUrl = null;
@@ -272,7 +261,7 @@ module.exports = {
         const streamEmbed = new EmbedBuilder()
           .setColor(BABY_BLUE)
           .setTitle('chi stream ♡')
-          .setDescription(`chi stream ♡ modo: **ENCENDIDO**\n\n🎶 **Reproduciendo actualmente:**\n${currentlyPlayingText}\n\n¿Quieres que envíe un mensaje cada vez que se salte una canción? ♡`)
+          .setDescription(`chi stream ♡ modo: **ENCENDIDO** para <@${userId}>\n\n🎶 **Reproduciendo actualmente:**\n${currentlyPlayingText}\n\n¿Quieres que envíe un mensaje cada vez que se salte una canción? ♡`)
           .addFields(
             { name: 'Porcentaje', value: `**${percent}%**`, inline: true },
             { name: 'Segundos extra', value: `**+${seconds}s**`, inline: true }
@@ -282,42 +271,46 @@ module.exports = {
 
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
-            .setCustomId('stream_notify_yes')
+            .setCustomId(`stream_notify_yes_${userId}`)
             .setLabel('Sí ♡')
             .setStyle(ButtonStyle.Success),
           new ButtonBuilder()
-            .setCustomId('stream_notify_no')
+            .setCustomId(`stream_notify_no_${userId}`)
             .setLabel('No ♡')
             .setStyle(ButtonStyle.Secondary)
         );
 
         const replyMsg = await message.reply({ embeds: [streamEmbed], components: [row] });
 
-        const filter = i => i.user.id === message.author.id;
+        const filter = i => i.user.id === userId;
         const collector = replyMsg.createMessageComponentCollector({ filter, time: 30000 });
 
         collector.on('collect', async i => {
-          if (i.customId === 'stream_notify_yes') {
-            streamConfig.notifyOnSkip = true;
-          } else if (i.customId === 'stream_notify_no') {
-            streamConfig.notifyOnSkip = false;
+          const currentConfig = activeStreams.get(userId);
+          if (currentConfig) {
+            if (i.customId.startsWith('stream_notify_yes')) {
+              currentConfig.notifyOnSkip = true;
+            } else if (i.customId.startsWith('stream_notify_no')) {
+              currentConfig.notifyOnSkip = false;
+            }
           }
 
           const disabledRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-              .setCustomId('stream_notify_yes')
+              .setCustomId('yes_disabled')
               .setLabel('Sí ♡')
               .setStyle(ButtonStyle.Success)
               .setDisabled(true),
             new ButtonBuilder()
-              .setCustomId('stream_notify_no')
+              .setCustomId('no_disabled')
               .setLabel('No ♡')
               .setStyle(ButtonStyle.Secondary)
               .setDisabled(true)
           );
 
+          const isNotifOn = currentConfig ? currentConfig.notifyOnSkip : true;
           const updatedEmbed = EmbedBuilder.from(streamEmbed)
-            .setFooter({ text: streamConfig.notifyOnSkip ? 'Notificaciones activadas ♡' : 'Notificaciones desactivadas ♡' });
+            .setFooter({ text: isNotifOn ? 'Notificaciones activadas ♡' : 'Notificaciones desactivadas ♡' });
 
           await i.update({ embeds: [updatedEmbed], components: [disabledRow] });
           collector.stop();
@@ -325,16 +318,14 @@ module.exports = {
 
         collector.on('end', async (collected, reason) => {
           if (reason === 'time' && collected.size === 0) {
-            streamConfig.notifyOnSkip = true;
-
             const disabledRow = new ActionRowBuilder().addComponents(
               new ButtonBuilder()
-                .setCustomId('stream_notify_yes')
+                .setCustomId('yes_disabled')
                 .setLabel('Sí ♡')
                 .setStyle(ButtonStyle.Success)
                 .setDisabled(true),
               new ButtonBuilder()
-                .setCustomId('stream_notify_no')
+                .setCustomId('no_disabled')
                 .setLabel('No ♡')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(true)
@@ -397,7 +388,7 @@ module.exports = {
         const pauseEmbed = new EmbedBuilder()
           .setColor(BABY_BLUE)
           .setTitle('⏸️ Música Pausada ♡')
-          .setDescription('Se ha pausado la reproducción en Spotify.');
+          .setDescription('Se ha pausado la reproducción en tu Spotify.');
 
         return message.reply({ embeds: [pauseEmbed] });
       }
@@ -405,15 +396,18 @@ module.exports = {
       // --- COMANDO STOP ---
       if (commandName === 'stop') {
         await spotifyApi.pause();
-        streamConfig.enabled = false;
-        streamConfig.userId = null;
-        if (pollInterval) clearInterval(pollInterval);
-        pollInterval = null;
+
+        // Apagar solo el stream de esta persona si lo tiene activo
+        if (activeStreams.has(userId)) {
+          const userStream = activeStreams.get(userId);
+          clearInterval(userStream.intervalId);
+          activeStreams.delete(userId);
+        }
 
         const stopEmbed = new EmbedBuilder()
           .setColor(BABY_BLUE)
           .setTitle('⏹️ Música Detenida ♡')
-          .setDescription('Se pausó Spotify y se desactivó el Modo Stream.');
+          .setDescription('Se pausó tu Spotify y se desactivó tu Modo Stream.');
 
         return message.reply({ embeds: [stopEmbed] });
       }
@@ -424,7 +418,7 @@ module.exports = {
         const skipEmbed = new EmbedBuilder()
           .setColor(BABY_BLUE)
           .setTitle('⏭️ Canción Saltada ♡')
-          .setDescription('Se pasó a la siguiente canción en Spotify.');
+          .setDescription('Se pasó a la siguiente canción en tu Spotify.');
 
         return message.reply({ embeds: [skipEmbed] });
       }
