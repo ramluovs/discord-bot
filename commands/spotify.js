@@ -229,8 +229,8 @@ module.exports = {
         const option = args[0]?.toLowerCase();
         const userStream = activeStreams.get(userId);
 
-        // APAGAR STREAM
-        if (userStream && (option === 'off' || option === 'stop' || !args[0] || !isNaN(args[0]))) {
+        // APAGAR STREAM (solo si no se pasan argumentos, o se pide explícitamente off/stop)
+        if (userStream && (option === 'off' || option === 'stop' || !args[0])) {
           clearInterval(userStream.intervalId);
 
           const durationMs = Date.now() - userStream.startTime;
@@ -248,9 +248,15 @@ module.exports = {
           return message.reply({ embeds: [offEmbed] });
         }
 
-        // ENCENDER STREAM
-        const percent = Number(args[0]) || 50;
-        const seconds = Number(args[1]) || 5;
+        // ENCENDER STREAM (o reconfigurar uno que ya estaba activo)
+        const percent = args[0] !== undefined && !isNaN(args[0]) ? Number(args[0]) : 50;
+        const seconds = args[1] !== undefined && !isNaN(args[1]) ? Number(args[1]) : 5;
+
+        // Si ya había un stream corriendo para este usuario, apagamos su intervalo
+        // antes de crear uno nuevo para no duplicar los chequeos de auto-salto.
+        if (userStream) {
+          clearInterval(userStream.intervalId);
+        }
 
         const intervalId = setInterval(() => checkAndSkipForUser(message.client, userId), 2500);
 
