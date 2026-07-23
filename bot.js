@@ -43,7 +43,7 @@ const LYRICS_COMMANDS = ['lyricaudio'];
 const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks', 'banana', 'moneda', 'flip', 'coin', 'tictactoe'];
 const MUSIC_COMMANDS = ['musicadd', 'musicdelete', 'musiclist', 'addmusicimage', 'musictrack', 'musicuntrack', 'musictracklist'];
 const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group', 'rs'];
-const SPOTIFY_COMMANDS = ['spotify', 'stream', 'play', 'sp', 'pause', 'skip', 'help'];
+const SPOTIFY_COMMANDS = ['spotify', 'stream', 'play', 'sp', 'pause', 'skip', 'help', 'lyrics', 'letra'];
 
 const client = new Client({
   intents: [
