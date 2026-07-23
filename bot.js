@@ -41,7 +41,6 @@ const conectar = require('./commands/conectar');
 const CARD_COMMANDS = ['addcard', 'cards', 'quiz', 'stop', 'deletecard', 'resetcards'];
 const LYRICS_COMMANDS = ['lyricaudio'];
 const FUN_COMMANDS = ['birthday', 'testbirthday', 'links', 'editlinks', 'banana', 'moneda', 'flip', 'coin', 'tictactoe'];
-const MEDIA_COMMANDS = ['c', 'yt', 'dl'];
 const MUSIC_COMMANDS = ['musicadd', 'musicdelete', 'musiclist', 'addmusicimage', 'musictrack', 'musicuntrack', 'musictracklist'];
 const ROBLOX_COMMANDS = ['user', 'av', 'avatar', 'name', 'names', 'group', 'rs'];
 const SPOTIFY_COMMANDS = ['spotify', 'stream', 'play', 'sp', 'pause', 'skip', 'help'];
@@ -79,7 +78,7 @@ function parsePrefixedCommand(content) {
 }
 
 // ===== READY =====
-client.once('ready', () => {
+client.once('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
   fun.scheduleBirthdayCheck(client);
   const { scheduleTracking } = require('./music/tracking');
@@ -108,73 +107,104 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  // --- COMANDO ASK ---
-  if (parsedCommand.prefix === 'chi ' && parsedCommand.commandName === 'ask') {
-    return ask.execute(message);
-  }
+  try {
+    // --- COMANDO ASK ---
+    if (parsedCommand.prefix === 'chi ' && parsedCommand.commandName === 'ask') {
+      return await ask.execute(message);
+    }
 
-  // --- NUEVOS COMANDOS DE SPOTIFY ---
-  if (parsedCommand.commandName === 'conectar') {
-    return conectar.execute(message, parsedCommand);
-  }
+    // --- NUEVOS COMANDOS DE SPOTIFY ---
+    if (parsedCommand.commandName === 'conectar') {
+      return await conectar.execute(message, parsedCommand);
+    }
 
-  if (parsedCommand.commandName === 'ya') {
-    return ya.execute(message, parsedCommand);
-  }
+    if (parsedCommand.commandName === 'ya') {
+      return await ya.execute(message, parsedCommand);
+    }
 
-  if (SPOTIFY_COMMANDS.includes(parsedCommand.commandName)) {
-    return spotify.execute(message, parsedCommand);
-  }
+    if (SPOTIFY_COMMANDS.includes(parsedCommand.commandName)) {
+      return await spotify.execute(message, parsedCommand);
+    }
 
-  // --- COMANDOS ORIGINALES ---
-  if (moderationCommands[parsedCommand.commandName]) {
-    return moderationCommands[parsedCommand.commandName].execute(message, parsedCommand);
-  }
+    // --- COMANDOS ORIGINALES ---
+    if (moderationCommands[parsedCommand.commandName]) {
+      return await moderationCommands[parsedCommand.commandName].execute(message, parsedCommand);
+    }
 
-  if (CARD_COMMANDS.includes(parsedCommand.commandName)) {
-    return cards.execute(message, parsedCommand);
-  }
+    if (CARD_COMMANDS.includes(parsedCommand.commandName)) {
+      return await cards.execute(message, parsedCommand);
+    }
 
-  if (LYRICS_COMMANDS.includes(parsedCommand.commandName)) {
-    return lyrics.execute(message, parsedCommand);
-  }
+    if (LYRICS_COMMANDS.includes(parsedCommand.commandName)) {
+      return await lyrics.execute(message, parsedCommand);
+    }
 
-  if (FUN_COMMANDS.includes(parsedCommand.commandName)) {
-    return fun.execute(message, parsedCommand);
-  }
+    if (FUN_COMMANDS.includes(parsedCommand.commandName)) {
+      return await fun.execute(message, parsedCommand);
+    }
 
-  if (parsedCommand.commandName === 'c') {
-    return convert.execute(message, parsedCommand);
-  }
+    if (parsedCommand.commandName === 'c') {
+      return await convert.execute(message, parsedCommand);
+    }
 
-  if (parsedCommand.commandName === 'yt') {
-    return yt.execute(message, parsedCommand);
-  }
+    if (parsedCommand.commandName === 'yt') {
+      return await yt.execute(message, parsedCommand);
+    }
 
-  if (parsedCommand.commandName === 'dl') {
-    return dl.execute(message, parsedCommand);
-  }
+    if (parsedCommand.commandName === 'dl') {
+      return await dl.execute(message, parsedCommand);
+    }
 
-  if (parsedCommand.commandName === 'ig') {
-    return ig.execute(message, parsedCommand);
-  }
+    if (parsedCommand.commandName === 'ig') {
+      return await ig.execute(message, parsedCommand);
+    }
 
-  if (MUSIC_COMMANDS.includes(parsedCommand.commandName)) {
-    return music.execute(message, parsedCommand);
-  }
+    if (MUSIC_COMMANDS.includes(parsedCommand.commandName)) {
+      return await music.execute(message, parsedCommand);
+    }
 
-  if (ROBLOX_COMMANDS.includes(parsedCommand.commandName)) {
-    return roblox.execute(message, parsedCommand);
+    if (ROBLOX_COMMANDS.includes(parsedCommand.commandName)) {
+      return await roblox.execute(message, parsedCommand);
+    }
+  } catch (err) {
+    console.error(`[Comando: ${parsedCommand.commandName}] Error inesperado:`, err);
+    try {
+      await message.reply('⚠️ Ocurrió un error inesperado ejecutando ese comando.');
+    } catch (_) {
+      // Si ni siquiera se puede responder, solo lo dejamos loggeado arriba.
+    }
   }
 });
 
 // ===== BUTTON HANDLER =====
 client.on('interactionCreate', async interaction => {
-  const handledAIInteraction = await ask.handleInteraction(interaction);
-  if (handledAIInteraction) return;
+  try {
+    const handledAIInteraction = await ask.handleInteraction(interaction);
+    if (handledAIInteraction) return;
 
-  const handledCards = await cards.handleInteraction(interaction);
-  if (handledCards) return;
+    const handledCards = await cards.handleInteraction(interaction);
+    if (handledCards) return;
+  } catch (err) {
+    console.error('[interactionCreate] Error inesperado:', err);
+  }
 });
 
-client.login(process.env.TOKEN);
+// ===== ESTABILIDAD EN TERMUX =====
+// Evita que un error o promesa no manejada tumbe el proceso silenciosamente.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
+if (!process.env.TOKEN) {
+  console.error('❌ Falta la variable de entorno TOKEN. El bot no puede iniciar sesión sin ella.');
+  process.exit(1);
+}
+
+client.login(process.env.TOKEN).catch(err => {
+  console.error('❌ Error al iniciar sesión con Discord:', err.message || err);
+  process.exit(1);
+});
