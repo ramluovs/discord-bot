@@ -74,6 +74,83 @@ function formatTime(ms) {
   return `${parts[0]}, ${parts[1]} y ${parts[2]}`;
 }
 
+// Quita las marcas de tiempo [mm:ss.xx] de una letra sincronizada (LRC)
+function stripLrcTimestamps(text) {
+  return text.replace(/^\[\d+:\d+(?:\.\d+)?\]\s*/gm, '');
+}
+
+// Divide una letra larga en trozos que quepan en la descripción de un embed (máx. 4096 caracteres)
+function chunkLyrics(text, maxLen = 4000) {
+  const lines = text.split('\n');
+  const chunks = [];
+  let current = '';
+
+  for (const line of lines) {
+    if ((current + line + '\n').length > maxLen) {
+      chunks.push(current.trim());
+      current = '';
+    }
+    current += line + '\n';
+  }
+  if (current.trim()) chunks.push(current.trim());
+
+  return chunks.length ? chunks : [text.slice(0, maxLen)];
+}
+
+// Busca la letra de una canción en lrclib.net (API pública y gratuita, sin necesidad de API key)
+async function fetchLyricsForTrack(track) {
+  const artistName = track.artists?.[0]?.name || '';
+  const albumName = track.album?.name || '';
+  const durationSec = Math.round((track.duration_ms || 0) / 1000);
+  const userAgent = 'chi-discord-bot/1.0 (personal, non-commercial use)';
+
+  try {
+    // 1) Intento exacto: coincide track + artista + álbum + duración (±2s)
+    const getParams = new URLSearchParams({
+      track_name: track.name,
+      artist_name: artistName,
+      album_name: albumName,
+      duration: String(durationSec)
+    });
+
+    const getResponse = await fetch(`https://lrclib.net/api/get?${getParams.toString()}`, {
+      headers: { 'User-Agent': userAgent }
+    });
+
+    if (getResponse.ok) {
+      const data = await getResponse.json();
+      const text = data.plainLyrics || (data.syncedLyrics ? stripLrcTimestamps(data.syncedLyrics) : null);
+      if (text) return { lyrics: text };
+      if (data.instrumental) return { error: 'instrumental' };
+    }
+
+    // 2) Si el match exacto falla (p. ej. la duración no coincide exactamente), probamos una búsqueda más flexible
+    const searchParams = new URLSearchParams({
+      track_name: track.name,
+      artist_name: artistName
+    });
+
+    const searchResponse = await fetch(`https://lrclib.net/api/search?${searchParams.toString()}`, {
+      headers: { 'User-Agent': userAgent }
+    });
+
+    if (!searchResponse.ok) return { error: 'api_error' };
+
+    const results = await searchResponse.json();
+    const match = results?.[0];
+
+    if (!match) return { error: 'not_found' };
+
+    const text = match.plainLyrics || (match.syncedLyrics ? stripLrcTimestamps(match.syncedLyrics) : null);
+    if (!text) return { error: 'instrumental' };
+
+    return { lyrics: text };
+  } catch (err) {
+    console.error('[Lyrics Fetch Error]:', err.message || err);
+    return { error: 'network_error' };
+  }
+}
+
 // Comprobador individual por usuario para el Modo Stream
 async function checkAndSkipForUser(client, userId) {
   const userStream = activeStreams.get(userId);
@@ -191,7 +268,8 @@ module.exports = {
         .setDescription(`¡Puedes usar tanto \`;\` como \`chi \` como prefijo! ♡`)
         .addFields(
           { name: '🟢 Modo Stream ♡', value: `\`${prefix}stream\` - Activa o desactiva tu modo stream personal (**50% + 5s**)\n\`${prefix}stream 60 10\` - Ajusta tu porcentaje y segundos` },
-          { name: '▶️ Controles de Reproducción ♡', value: `\`${prefix}play [canción]\` o \`${prefix}sp [canción]\` - Buscar y poner canción\n\`${prefix}pause\` - Pausar música\n\`${prefix}play\` - Reanudar música\n\`${prefix}skip\` - Saltar canción\n\`${prefix}stop\` - Detener música y apagar tu modo stream` }
+          { name: '▶️ Controles de Reproducción ♡', value: `\`${prefix}play [canción]\` o \`${prefix}sp [canción]\` - Buscar y poner canción\n\`${prefix}pause\` - Pausar música\n\`${prefix}play\` - Reanudar música\n\`${prefix}skip\` - Saltar canción\n\`${prefix}stop\` - Detener música y apagar tu modo stream` },
+          { name: '🎤 Letras ♡', value: `\`${prefix}lyrics\` - Muestra la letra de lo que estás escuchando ahora mismo` }
         )
         .setFooter({ text: 'Spotify Conectado ♡' });
 
@@ -450,6 +528,61 @@ module.exports = {
           .setDescription('Se pasó a la siguiente canción en tu Spotify.');
 
         return message.reply({ embeds: [skipEmbed] });
+      }
+
+      // --- COMANDO LYRICS ---
+      if (commandName === 'lyrics' || commandName === 'letra') {
+        const playback = await spotifyApi.getMyCurrentPlaybackState();
+
+        if (!playback.body || !playback.body.item) {
+          const nothingEmbed = new EmbedBuilder()
+            .setColor(BABY_BLUE)
+            .setTitle('🎤 Sin reproducción ♡')
+            .setDescription('No hay ninguna canción sonando en tu Spotify ahora mismo.');
+
+          return message.reply({ embeds: [nothingEmbed] });
+        }
+
+        const track = playback.body.item;
+        const loadingMsg = await message.reply(`🔎 Buscando la letra de **${track.name}**...`);
+
+        const result = await fetchLyricsForTrack(track);
+
+        if (result.error) {
+          const reasonText = result.error === 'instrumental'
+            ? 'Parece que es una pista instrumental (sin letra).'
+            : `No encontré la letra de **${track.name}** de **${track.artists[0]?.name}**.`;
+
+          const notFoundEmbed = new EmbedBuilder()
+            .setColor(BABY_BLUE)
+            .setTitle('❌ Letra no disponible ♡')
+            .setDescription(reasonText)
+            .setFooter({ text: 'Fuente: lrclib.net ♡' });
+
+          return loadingMsg.edit({ content: null, embeds: [notFoundEmbed] });
+        }
+
+        const chunks = chunkLyrics(result.lyrics);
+
+        const firstEmbed = new EmbedBuilder()
+          .setColor(BABY_BLUE)
+          .setTitle(`🎤 ${track.name}`)
+          .setDescription(chunks[0])
+          .setThumbnail(track.album?.images[0]?.url || null)
+          .setFooter({ text: `${track.artists[0]?.name || ''}${chunks.length > 1 ? ` · Parte 1/${chunks.length}` : ''} · lrclib.net ♡` });
+
+        await loadingMsg.edit({ content: null, embeds: [firstEmbed] });
+
+        for (let i = 1; i < chunks.length; i++) {
+          const partEmbed = new EmbedBuilder()
+            .setColor(BABY_BLUE)
+            .setDescription(chunks[i])
+            .setFooter({ text: `Parte ${i + 1}/${chunks.length} · lrclib.net ♡` });
+
+          await message.channel.send({ embeds: [partEmbed] });
+        }
+
+        return;
       }
 
     } catch (err) {
