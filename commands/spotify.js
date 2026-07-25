@@ -31,6 +31,9 @@ async function getSpotifyApiForUser(discordUserId, forceRefresh = false) {
     }
 
     if (!response.ok) {
+      let bodyText = '';
+      try { bodyText = await response.text(); } catch (_) {}
+      console.error(`[Spotify Token Fetch] Lovable respondió ${response.status} para ${discordUserId}: ${bodyText}`);
       return { error: 'api_error' };
     }
 
@@ -151,6 +154,25 @@ async function fetchLyricsForTrack(track) {
   }
 }
 
+// Avisa al usuario en el canal de streaming cuando su Modo Stream se apaga
+// solo, para que no se quede "encendido" en su cabeza sin saberlo.
+async function notifyStreamDisabled(client, userId) {
+  if (!client) return;
+  try {
+    const targetChannel = client.channels.cache.get(TARGET_CHANNEL_ID) || await client.channels.fetch(TARGET_CHANNEL_ID);
+    if (!targetChannel) return;
+
+    const disabledEmbed = new EmbedBuilder()
+      .setColor(BABY_BLUE)
+      .setTitle('🔴 Modo Stream desactivado ♡')
+      .setDescription(`<@${userId}>, tu Modo Stream se apagó solo después de varios errores seguidos hablando con Spotify.\n\nUsa \`chi stream\` de nuevo cuando quieras reactivarlo.`);
+
+    await targetChannel.send({ embeds: [disabledEmbed] });
+  } catch (err) {
+    console.error('[Spotify Stream] Error notificando desactivación automática:', err.message || JSON.stringify(err));
+  }
+}
+
 // Comprobador individual por usuario para el Modo Stream
 async function checkAndSkipForUser(client, userId) {
   const userStream = activeStreams.get(userId);
@@ -163,6 +185,7 @@ async function checkAndSkipForUser(client, userId) {
       console.log(`[Spotify Stream] Deteniendo stream para ${userId} por errores continuos de token.`);
       clearInterval(userStream.intervalId);
       activeStreams.delete(userId);
+      notifyStreamDisabled(client, userId);
     }
     return;
   }
@@ -197,11 +220,18 @@ async function checkAndSkipForUser(client, userId) {
     const targetMs = (durationMs * (userStream.percent / 100)) + (userStream.extraSeconds * 1000);
 
     if (progressMs >= targetMs && userStream.lastSkippedTrackId !== oldTrack.id) {
+      // IMPORTANTE: intentamos saltar PRIMERO y solo marcamos la canción
+      // como "ya saltada" si skipToNext() tuvo éxito. Antes se marcaba
+      // como saltada ANTES de confirmar el éxito, así que si la llamada
+      // fallaba por cualquier motivo pasajero (red, "no hay dispositivo
+      // activo" durante la transición, rate limit, etc.), esa canción
+      // quedaba bloqueada para siempre y el bot nunca volvía a intentar
+      // saltarla — sonaba completa hasta el final. Esto es lo que hacía
+      // que solo la primera canción funcionara bien.
+      await spotifyApi.skipToNext();
+
       userStream.lastSkippedTrackId = oldTrack.id;
       userStream.skippedCount++;
-
-      // Saltar canción
-      await spotifyApi.skipToNext();
 
       await new Promise(resolve => setTimeout(resolve, 800));
 
@@ -251,6 +281,7 @@ async function checkAndSkipForUser(client, userId) {
       console.log(`[Spotify Stream] Deteniendo automáticamente el Modo Stream para <@${userId}> tras 5 errores consecutivos.`);
       clearInterval(userStream.intervalId);
       activeStreams.delete(userId);
+      notifyStreamDisabled(client, userId);
     }
   }
 }
