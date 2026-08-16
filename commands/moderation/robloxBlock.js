@@ -110,7 +110,7 @@ module.exports = {
 
         if (!isAdmin && !isFriend) {
             await sendLog(message.client, `🚨 <@${discordId}> intentó usar \`${cmdName}\` pero **NO tiene permisos**.`);
-            return message.reply(createCuteEmbed("🛑 Sin Permisos", "¡Ups! No tienes los permisos para usar este comandito... 🥺🩵"));
+            return message.reply(createCuteEmbed("🛑 Sin Permisos", "¡Ups! No tienes los permisos para usar este comandito... 🩵"));
         }
 
         const now = Date.now();
@@ -121,7 +121,7 @@ module.exports = {
             if (now < expiration) {
                 const timeLeft = ((expiration - now) / 1000).toFixed(1);
                 await sendLog(message.client, `⏱️ <@${discordId}> golpeó su cooldown personal de 5s al intentar usar \`${cmdName}\`.`);
-                return message.reply(createCuteEmbed("⏱️ ¡Ve más despacio!", `¡Ve más despacio, angelito! Espera \`${timeLeft}\`s antes de enviar otro comandito. 🤍`));
+                return message.reply(createCuteEmbed("⏱️ ¡Ve más despacio!", `¡Ve más despacio! Espera \`${timeLeft}\`s antes de enviar otro comandito. 🤍`));
             }
         }
         global.userCooldowns.set(discordId, now);
@@ -132,7 +132,7 @@ module.exports = {
             
             if (list.length === 0) {
                 await sendLog(message.client, `📜 <@${discordId}> revisó la lista, pero está vacía.`);
-                return message.reply(createCuteEmbed("📜 Lista de Permitidos", "¡La lista está vacía, angelito! No hay nadie permitido para bloquear por ahora. ☁️✨"));
+                return message.reply(createCuteEmbed("📜 Lista de Permitidos", "¡La lista está vacía! No hay nadie permitido para bloquear por ahora. ☁️✨"));
             }
 
             const usersInfo = await getUsersInfo(list);
@@ -210,7 +210,7 @@ module.exports = {
             const list = JSON.parse(fs.readFileSync(LIST_PATH));
             if (!list.includes(targetId)) {
                 await sendLog(message.client, `🛑 <@${discordId}> intentó ${actionEs} al ID \`${targetId}\`, pero **NO está en la lista permitida**.`);
-                return message.reply(createCuteEmbed("🛑 Usuario no permitido", "¡Uy! Solo puedes modificar a los usuarios que están en nuestra lista aprobada. 🥺🩵"));
+                return message.reply(createCuteEmbed("🛑 Usuario no permitido", "¡Uy! Solo puedes modificar a los usuarios que están en nuestra lista aprobada. 🩵"));
             }
         }
 
@@ -228,7 +228,7 @@ module.exports = {
             return message.reply(createCuteEmbed("🎉 Acción Exitosa ✨", `¡Súper! Se ha **${actionEsPast}** con éxito. 🤍\n\n🔗 **Perfil:** [Haz clic aquí para ver su Roblox](https://www.roblox.com/users/${targetId}/profile)\n🆔 **ID:** \`${targetId}\``));
         } else {
             await sendLog(message.client, `❌ <@${discordId}> **FALLÓ** al intentar ${actionEs} al ID \`${targetId}\`. (Posible error de API, cookie expirada o ya estaba ${actionEsPast}).`);
-            return message.reply(createCuteEmbed("❌ Error al modificar", `¡Oh no! Falló al intentar hacer esto. Revisa que no esté ya ${actionEsPast}. 🥺🩵`));
+            return message.reply(createCuteEmbed("❌ Error al modificar", `¡Oh no! Falló al intentar hacer esto. Revisa que no esté ya ${actionEsPast}. 🩵`));
         }
     }
 };
