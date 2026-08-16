@@ -37,7 +37,9 @@ const moderationCommands = {
   unblock: robloxBlock,
   ubl: robloxBlock,
   addbl: robloxBlock,
-  rbl: robloxBlock
+  rbl: robloxBlock,
+  blocklist: robloxBlock,
+  abl: robloxBlock
   // <-- NEW ROBLOX BLOCK ALIASES END -->
 };
 
