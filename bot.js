@@ -15,6 +15,7 @@ const fun = require('./commands/fun');
 const music = require('./music/music');
 const roblox = require('./commands/roblox');
 const versus = require('./commands/moderation/versus');
+const robloxBlock = require('./commands/moderation/robloxBlock'); // <-- NEW IMPORT
 
 const moderationCommands = {
   ban: require('./commands/moderation/ban'),
@@ -29,7 +30,15 @@ const moderationCommands = {
   invitar: require('./commands/moderation/invite'),
   versus,
   versusadd: versus,
-  versusdelete: versus
+  versusdelete: versus,
+  // <-- NEW ROBLOX BLOCK ALIASES START -->
+  block: robloxBlock,
+  bl: robloxBlock,
+  unblock: robloxBlock,
+  ubl: robloxBlock,
+  addbl: robloxBlock,
+  rbl: robloxBlock
+  // <-- NEW ROBLOX BLOCK ALIASES END -->
 };
 
 // === IMPORTACIÓN DE NUEVOS COMANDOS (SPOTIFY) ===
