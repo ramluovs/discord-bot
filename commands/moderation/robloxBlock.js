@@ -77,7 +77,10 @@ async function robloxAction(userId, action, cookie) {
     const url = `https://accountsettings.roblox.com/v1/users/${userId}/${action}`;
     const headers = { 
         'Cookie': `.ROBLOSECURITY=${cookie}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Origin': 'https://www.roblox.com',
+        'Referer': 'https://www.roblox.com/'
     };
     
     try {
