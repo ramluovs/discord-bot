@@ -2,42 +2,44 @@ const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
 
-// We use global maps so cooldowns don't reset unless you restart the bot
 global.userCooldowns = global.userCooldowns || new Map();
 global.targetCooldowns = global.targetCooldowns || new Map();
 
-const ADMIN_ROLE = '1340864854243803248'; // Can block anyone + edit list
-const FRIEND_ROLE = '1538673525592690778'; // Can only block from list
-const LOG_CHANNEL_ID = '1538680633499451493'; // Your private log channel
+const ADMIN_ROLE = '1340864854243803248';
+const FRIEND_ROLE = '1538673525592690778';
+const LOG_CHANNEL_ID = '1538680633499451493';
 
-// This creates a JSON file in your main bot folder to safely store the IDs
 const LIST_PATH = path.join(__dirname, '..', '..', 'allowed_blocks.json');
 if (!fs.existsSync(LIST_PATH)) {
     fs.writeFileSync(LIST_PATH, JSON.stringify([]));
 }
 
-// Helper para crear Embeds bonitos con el tema Baby Blue / White
-function createCuteEmbed(title, description) {
+function createEmbed(title, description) {
     const embed = new EmbedBuilder()
-        .setColor('#AEE2FF') // Color Azul Bebé
+        .setColor('#AEE2FF')
         .setDescription(description);
     if (title) embed.setTitle(title);
     return { embeds: [embed] };
 }
 
-// Helper function to send logs to your channel
-async function sendLog(client, logText) {
+async function sendLog(client, title, description) {
     try {
         const channel = client.channels.cache.get(LOG_CHANNEL_ID) || await client.channels.fetch(LOG_CHANNEL_ID);
         if (channel) {
-            await channel.send(`🩵 **| Log de Moderación Roblox:**\n🤍 ${logText}`);
+            const nowSeconds = Math.floor(Date.now() / 1000);
+            const logEmbed = new EmbedBuilder()
+                .setColor('#AEE2FF')
+                .setTitle(`Log: ${title}`)
+                .setDescription(`${description}\n\n**Hora:** <t:${nowSeconds}:T>`)
+                .setTimestamp();
+            
+            await channel.send({ embeds: [logEmbed] });
         }
     } catch (e) {
-        console.error("No se pudo enviar el log de Roblox:", e);
+        console.error("Error enviando log de Roblox:", e);
     }
 }
 
-// Helper function to convert a username into a Roblox ID
 async function getUserIdFromUsername(username) {
     try {
         const res = await fetch('https://users.roblox.com/v1/usernames/users', {
@@ -55,7 +57,6 @@ async function getUserIdFromUsername(username) {
     return null;
 }
 
-// Helper function to get Display Names and Usernames from a list of IDs
 async function getUsersInfo(userIds) {
     if (!userIds || userIds.length === 0) return [];
     try {
@@ -72,7 +73,6 @@ async function getUsersInfo(userIds) {
     }
 }
 
-// Helper function to handle the Roblox API and CSRF tokens
 async function robloxAction(userId, action, cookie) {
     const url = `https://accountsettings.roblox.com/v1/users/${userId}/${action}`;
     const headers = { 
@@ -99,45 +99,44 @@ async function robloxAction(userId, action, cookie) {
 module.exports = {
     name: 'block',
     aliases: ['bl', 'unblock', 'ubl', 'addbl', 'rbl', 'blocklist', 'abl'],
-    async execute(message, args) {
-        const prefix = message.content.startsWith('chi ') ? 'chi ' : ';';
-        const cmdName = message.content.slice(prefix.length).trim().split(/ +/)[0].toLowerCase();
+    async execute(message, parsedCommand) {
+        // La información estructurada proviene de bot.js
+        const cmdName = parsedCommand.commandName;
+        const targetInput = parsedCommand.args[0];
         const discordId = message.author.id;
-        const targetInput = args[0];
 
         const isAdmin = message.member.roles.cache.has(ADMIN_ROLE);
         const isFriend = message.member.roles.cache.has(FRIEND_ROLE);
 
         if (!isAdmin && !isFriend) {
-            await sendLog(message.client, `🚨 <@${discordId}> intentó usar \`${cmdName}\` pero **NO tiene permisos**.`);
-            return message.reply(createCuteEmbed("🛑 Sin Permisos", "¡Ups! No tienes los permisos para usar este comandito... 🩵"));
+            await sendLog(message.client, "Acceso Denegado", `<@${discordId}> intentó usar \`${cmdName}\` sin permisos.`);
+            return message.reply(createEmbed("Sin Permisos", "No posees los permisos necesarios para ejecutar este comando. 🩵"));
         }
 
         const now = Date.now();
 
-        // 1. Check User Cooldown (5 seconds for ANY command)
         if (global.userCooldowns.has(discordId)) {
             const expiration = global.userCooldowns.get(discordId) + 5000;
             if (now < expiration) {
                 const timeLeft = ((expiration - now) / 1000).toFixed(1);
-                await sendLog(message.client, `⏱️ <@${discordId}> golpeó su cooldown personal de 5s al intentar usar \`${cmdName}\`.`);
-                return message.reply(createCuteEmbed("⏱️ ¡Ve más despacio!", `¡Ve más despacio! Espera \`${timeLeft}\`s antes de enviar otro comandito. 🤍`));
+                await sendLog(message.client, "Cooldown Personal", `<@${discordId}> intentó ejecutar \`${cmdName}\` demasiado rápido.`);
+                return message.reply(createEmbed("Límite de Tiempo", `Por favor espera \`${timeLeft}\`s antes de enviar otro comando. 🩵`));
             }
         }
         global.userCooldowns.set(discordId, now);
 
-        // --- MANEJO DEL COMANDO BLOCKLIST / ABL ---
+        // Comandos de lectura de lista
         if (['blocklist', 'abl'].includes(cmdName)) {
             let list = JSON.parse(fs.readFileSync(LIST_PATH));
             
             if (list.length === 0) {
-                await sendLog(message.client, `📜 <@${discordId}> revisó la lista, pero está vacía.`);
-                return message.reply(createCuteEmbed("📜 Lista de Permitidos", "¡La lista está vacía! No hay nadie permitido para bloquear por ahora. ☁️✨"));
+                await sendLog(message.client, "Lectura de Lista", `<@${discordId}> solicitó la lista, pero se encuentra vacía.`);
+                return message.reply(createEmbed("Lista Vacía", "La lista de usuarios permitidos para bloquear se encuentra vacía actualmente. 🩵"));
             }
 
             const usersInfo = await getUsersInfo(list);
-            
             let replyText = "";
+            
             list.forEach((id, index) => {
                 const info = usersInfo.find(u => u.id.toString() === id.toString());
                 if (info) {
@@ -147,19 +146,19 @@ module.exports = {
                 }
             });
 
-            await sendLog(message.client, `📜 <@${discordId}> revisó la lista de bloqueos permitidos.`);
-            return message.reply(createCuteEmbed("🩵 Usuarios Permitidos para Bloquear 🤍", replyText));
+            await sendLog(message.client, "Lectura de Lista", `<@${discordId}> consultó la lista de bloqueos permitidos.`);
+            return message.reply(createEmbed("Usuarios Permitidos", `${replyText}\n🩵`));
         }
 
-        // --- MANEJO DE COMANDOS QUE REQUIEREN UN USUARIO (BLOCK, UNBLOCK, ADDBL, RBL) ---
+        // Comandos que requieren un objetivo
         if (!targetInput) {
-            await sendLog(message.client, `<@${discordId}> intentó usar el comando \`${cmdName}\` pero no proporcionó ningún usuario.`);
-            return message.reply(createCuteEmbed("🤍 Faltan Datos ☁️", "¡Holi! Necesitas darme un ID de Roblox, un nombre de usuario o un enlace de perfil, por fis. 🩵"));
+            await sendLog(message.client, "Falta de Datos", `<@${discordId}> intentó usar \`${cmdName}\` sin proporcionar un objetivo.`);
+            return message.reply(createEmbed("Faltan Datos", "Se requiere un ID de Roblox, nombre de usuario o enlace de perfil para usar este comando. 🩵"));
         }
 
         let targetId = null;
-
         const linkMatch = targetInput.match(/(?:roblox\.com\/users\/)(\d+)/i);
+        
         if (linkMatch) {
             targetId = linkMatch[1];
         } else if (/^\d+$/.test(targetInput)) {
@@ -167,31 +166,34 @@ module.exports = {
         } else {
             targetId = await getUserIdFromUsername(targetInput);
             if (!targetId) {
-                await sendLog(message.client, `❓ <@${discordId}> buscó el usuario \`${targetInput}\`, pero **no existe** en Roblox.`);
-                return message.reply(createCuteEmbed("❓ Usuario no encontrado", `¡Ayy! No pude encontrar a ningún usuario de Roblox con el nombre \`${targetInput}\` ☁️❄️`));
+                await sendLog(message.client, "Usuario no Encontrado", `<@${discordId}> buscó \`${targetInput}\`, el cual no existe en Roblox.`);
+                return message.reply(createEmbed("Error de Búsqueda", "No se encontró un usuario de Roblox con la información proporcionada. 🩵"));
             }
         }
 
+        // Comandos de administración de lista
         if (['addbl', 'rbl'].includes(cmdName)) {
             if (!isAdmin) {
-                await sendLog(message.client, `⚠️ <@${discordId}> intentó editar la lista usando \`${cmdName}\`, pero no es administrador.`);
-                return message.reply(createCuteEmbed("⚠️ Acceso Denegado", "¡Ups! Solo los administradores pueden modificar la lista permitida. 🥺🩵"));
+                await sendLog(message.client, "Intento de Modificación", `<@${discordId}> intentó modificar la lista mediante \`${cmdName}\` sin ser administrador.`);
+                return message.reply(createEmbed("Acceso Denegado", "Solo los administradores pueden modificar la lista permitida. 🩵"));
             }
 
             let list = JSON.parse(fs.readFileSync(LIST_PATH));
+            
             if (cmdName === 'addbl') {
                 if (!list.includes(targetId)) list.push(targetId);
                 fs.writeFileSync(LIST_PATH, JSON.stringify(list));
-                await sendLog(message.client, `✅ <@${discordId}> **AÑADIÓ** el ID \`${targetId}\` a la lista permitida.`);
-                return message.reply(createCuteEmbed("✅ Usuario Añadido", `¡Listo! El ID \`${targetId}\` fue añadido a la lista permitida con éxito. 🩵✨`));
+                await sendLog(message.client, "Usuario Añadido", `<@${discordId}> añadió el ID \`${targetId}\` a la lista.`);
+                return message.reply(createEmbed("Operación Exitosa", `El ID \`${targetId}\` ha sido añadido a la lista permitida con éxito. 🩵`));
             } else {
                 list = list.filter(id => id !== targetId);
                 fs.writeFileSync(LIST_PATH, JSON.stringify(list));
-                await sendLog(message.client, `🗑️ <@${discordId}> **ELIMINÓ** el ID \`${targetId}\` de la lista permitida.`);
-                return message.reply(createCuteEmbed("🗑️ Usuario Eliminado", `¡Hecho! El ID \`${targetId}\` fue eliminado de la lista. ☁️💨`));
+                await sendLog(message.client, "Usuario Eliminado", `<@${discordId}> eliminó el ID \`${targetId}\` de la lista.`);
+                return message.reply(createEmbed("Operación Exitosa", `El ID \`${targetId}\` ha sido eliminado de la lista. 🩵`));
             }
         }
 
+        // Ejecución de bloqueo o desbloqueo
         const action = ['block', 'bl'].includes(cmdName) ? 'block' : 'unblock';
         const actionEs = action === 'block' ? 'bloquear' : 'desbloquear';
         const actionEsPast = action === 'block' ? 'bloqueado' : 'desbloqueado';
@@ -201,34 +203,34 @@ module.exports = {
             const expiration = global.targetCooldowns.get(targetKey) + 120000;
             if (now < expiration) {
                 const timeLeft = Math.ceil((expiration - now) / 1000);
-                await sendLog(message.client, `⏱️ <@${discordId}> intentó ${actionEs} al ID \`${targetId}\`, pero está en cooldown de 2 minutos.`);
-                return message.reply(createCuteEmbed("⏱️ Cooldown de Usuario", `¡Espera un poquito! Ese usuario acaba de ser modificado. Intenta de nuevo en \`${timeLeft}\`s. 🤍`));
+                await sendLog(message.client, "Cooldown de Usuario", `<@${discordId}> intentó ${actionEs} al ID \`${targetId}\` repetidamente.`);
+                return message.reply(createEmbed("Límite de Tiempo", `Este usuario ha sido modificado recientemente. Por favor espera \`${timeLeft}\`s. 🩵`));
             }
         }
 
         if (!isAdmin && isFriend) {
             const list = JSON.parse(fs.readFileSync(LIST_PATH));
             if (!list.includes(targetId)) {
-                await sendLog(message.client, `🛑 <@${discordId}> intentó ${actionEs} al ID \`${targetId}\`, pero **NO está en la lista permitida**.`);
-                return message.reply(createCuteEmbed("🛑 Usuario no permitido", "¡Uy! Solo puedes modificar a los usuarios que están en nuestra lista aprobada. 🩵"));
+                await sendLog(message.client, "Bloqueo Denegado", `<@${discordId}> intentó ${actionEs} al ID \`${targetId}\`, el cual no está en la lista.`);
+                return message.reply(createEmbed("Usuario no Permitido", "El usuario especificado no se encuentra en la lista aprobada. 🩵"));
             }
         }
 
         const cookie = process.env.ROBLOX_COOKIE;
         if (!cookie) {
-            await sendLog(message.client, `❌ Error del sistema: Faltan las cookies de Roblox para <@${discordId}>.`);
-            return message.reply(createCuteEmbed("🛠️ Error del Sistema", "¡Ayy, un error! Falta la cookie de Roblox en mi sistema. 🩵"));
+            await sendLog(message.client, "Error de Sistema", `Falta la cookie de Roblox. Ejecución fallida por <@${discordId}>.`);
+            return message.reply(createEmbed("Error de Configuración", "Falta la configuración de la cookie de Roblox en el sistema. 🩵"));
         }
 
         const success = await robloxAction(targetId, action, cookie);
         
         if (success) {
-            global.targetCooldowns.set(targetKey, now); // Start the 2 min cooldown
-            await sendLog(message.client, `🎉 <@${discordId}> ha **${actionEsPast.toUpperCase()}** exitosamente al ID \`${targetId}\`.`);
-            return message.reply(createCuteEmbed("🎉 Acción Exitosa ✨", `¡Súper! Se ha **${actionEsPast}** con éxito. 🤍\n\n🔗 **Perfil:** [Haz clic aquí para ver su Roblox](https://www.roblox.com/users/${targetId}/profile)\n🆔 **ID:** \`${targetId}\``));
+            global.targetCooldowns.set(targetKey, now);
+            await sendLog(message.client, "Acción Exitosa", `<@${discordId}> ha **${actionEsPast}** al ID \`${targetId}\` exitosamente.`);
+            return message.reply(createEmbed("Acción Completada", `El usuario ha sido **${actionEsPast}** exitosamente. 🩵\n\n**Perfil:** [Enlace de Roblox](https://www.roblox.com/users/${targetId}/profile)\n**ID:** \`${targetId}\``));
         } else {
-            await sendLog(message.client, `❌ <@${discordId}> **FALLÓ** al intentar ${actionEs} al ID \`${targetId}\`. (Posible error de API, cookie expirada o ya estaba ${actionEsPast}).`);
-            return message.reply(createCuteEmbed("❌ Error al modificar", `¡Oh no! Falló al intentar hacer esto. Revisa que no esté ya ${actionEsPast}. 🩵`));
+            await sendLog(message.client, "Fallo en Acción", `<@${discordId}> falló al intentar ${actionEs} al ID \`${targetId}\`.`);
+            return message.reply(createEmbed("Error", `Hubo un error al procesar la solicitud. Verifica la cookie o si el usuario ya estaba ${actionEsPast}. 🩵`));
         }
     }
 };
