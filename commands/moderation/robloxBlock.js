@@ -135,7 +135,6 @@ module.exports = {
                 return message.reply(createCuteEmbed("📜 Lista de Permitidos", "¡La lista está vacía, angelito! No hay nadie permitido para bloquear por ahora. ☁️✨"));
             }
 
-            // Fetch display names and usernames from Roblox
             const usersInfo = await getUsersInfo(list);
             
             let replyText = "";
@@ -158,7 +157,6 @@ module.exports = {
             return message.reply(createCuteEmbed("🤍 Faltan Datos ☁️", "¡Holi! Necesitas darme un ID de Roblox, un nombre de usuario o un enlace de perfil, por fis. 🩵"));
         }
 
-        // RESOLVE THE INPUT TO A ROBLOX ID
         let targetId = null;
 
         const linkMatch = targetInput.match(/(?:roblox\.com\/users\/)(\d+)/i);
@@ -174,7 +172,6 @@ module.exports = {
             }
         }
 
-        // Handle Admin-only list editing (addbl / rbl)
         if (['addbl', 'rbl'].includes(cmdName)) {
             if (!isAdmin) {
                 await sendLog(message.client, `⚠️ <@${discordId}> intentó editar la lista usando \`${cmdName}\`, pero no es administrador.`);
@@ -195,12 +192,10 @@ module.exports = {
             }
         }
 
-        // Handle block / unblock logic
         const action = ['block', 'bl'].includes(cmdName) ? 'block' : 'unblock';
         const actionEs = action === 'block' ? 'bloquear' : 'desbloquear';
         const actionEsPast = action === 'block' ? 'bloqueado' : 'desbloqueado';
 
-        // Check Target Cooldown (2 minutes)
         const targetKey = `${action}-${targetId}`;
         if (global.targetCooldowns.has(targetKey)) {
             const expiration = global.targetCooldowns.get(targetKey) + 120000;
@@ -211,7 +206,6 @@ module.exports = {
             }
         }
 
-        // If they are just a Friend, verify the ID is on the approved list
         if (!isAdmin && isFriend) {
             const list = JSON.parse(fs.readFileSync(LIST_PATH));
             if (!list.includes(targetId)) {
@@ -220,7 +214,6 @@ module.exports = {
             }
         }
 
-        // Execute the Roblox API request
         const cookie = process.env.ROBLOX_COOKIE;
         if (!cookie) {
             await sendLog(message.client, `❌ Error del sistema: Faltan las cookies de Roblox para <@${discordId}>.`);
@@ -237,7 +230,5 @@ module.exports = {
             await sendLog(message.client, `❌ <@${discordId}> **FALLÓ** al intentar ${actionEs} al ID \`${targetId}\`. (Posible error de API, cookie expirada o ya estaba ${actionEsPast}).`);
             return message.reply(createCuteEmbed("❌ Error al modificar", `¡Oh no! Falló al intentar hacer esto. Revisa que no esté ya ${actionEsPast}. 🥺🩵`));
         }
-    }
-};
     }
 };
