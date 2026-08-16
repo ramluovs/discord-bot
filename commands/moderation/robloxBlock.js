@@ -45,6 +45,23 @@ async function getUserIdFromUsername(username) {
     return null;
 }
 
+// Helper function to get Display Names and Usernames from a list of IDs
+async function getUsersInfo(userIds) {
+    if (!userIds || userIds.length === 0) return [];
+    try {
+        const res = await fetch('https://users.roblox.com/v1/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userIds: userIds, excludeBannedUsers: false })
+        });
+        const data = await res.json();
+        return data.data || [];
+    } catch (e) {
+        console.error("Roblox Multi-User Info API Error:", e);
+        return [];
+    }
+}
+
 // Helper function to handle the Roblox API and CSRF tokens
 async function robloxAction(userId, action, cookie) {
     const url = `https://accountsettings.roblox.com/v1/users/${userId}/${action}`;
@@ -71,27 +88,67 @@ async function robloxAction(userId, action, cookie) {
 
 module.exports = {
     name: 'block',
-    aliases: ['bl', 'unblock', 'ubl', 'addbl', 'rbl'],
+    aliases: ['bl', 'unblock', 'ubl', 'addbl', 'rbl', 'blocklist', 'abl'],
     async execute(message, args) {
         const prefix = message.content.startsWith('chi ') ? 'chi ' : ';';
         const cmdName = message.content.slice(prefix.length).trim().split(/ +/)[0].toLowerCase();
         const discordId = message.author.id;
         const targetInput = args[0];
 
+        const isAdmin = message.member.roles.cache.has(ADMIN_ROLE);
+        const isFriend = message.member.roles.cache.has(FRIEND_ROLE);
+
+        if (!isAdmin && !isFriend) {
+            await sendLog(message.client, `🚨 <@${discordId}> intentó usar \`${cmdName}\` pero **NO tiene permisos**.`);
+            return message.reply("🤍 ¡Ups! No tienes los permisos para usar este comandito... 🥺🩵");
+        }
+
+        const now = Date.now();
+
+        // 1. Check User Cooldown (5 seconds for ANY command)
+        if (global.userCooldowns.has(discordId)) {
+            const expiration = global.userCooldowns.get(discordId) + 5000;
+            if (now < expiration) {
+                const timeLeft = ((expiration - now) / 1000).toFixed(1);
+                await sendLog(message.client, `⏱️ <@${discordId}> golpeó su cooldown personal de 5s al intentar usar \`${cmdName}\`.`);
+                return message.reply(`🩵 ¡Ve más despacio, angelito! Espera \`${timeLeft}\`s antes de enviar otro comandito. 🤍`);
+            }
+        }
+        global.userCooldowns.set(discordId, now);
+
+        // --- MANEJO DEL COMANDO BLOCKLIST / ABL ---
+        if (['blocklist', 'abl'].includes(cmdName)) {
+            let list = JSON.parse(fs.readFileSync(LIST_PATH));
+            
+            if (list.length === 0) {
+                await sendLog(message.client, `📜 <@${discordId}> revisó la lista, pero está vacía.`);
+                return message.reply("🤍 ¡La lista está vacía, angelito! No hay nadie permitido para bloquear por ahora. ☁️✨");
+            }
+
+            // Fetch display names and usernames from Roblox
+            const usersInfo = await getUsersInfo(list);
+            
+            let replyText = "🩵 **Lista de Usuarios Permitidos para Bloquear:** 🤍\n\n";
+            list.forEach((id, index) => {
+                const info = usersInfo.find(u => u.id.toString() === id.toString());
+                if (info) {
+                    replyText += `${index + 1}. [${info.displayName} (@${info.name})](https://www.roblox.com/users/${id}/profile)\n`;
+                } else {
+                    replyText += `${index + 1}. [Usuario Oculto (ID: ${id})](https://www.roblox.com/users/${id}/profile)\n`;
+                }
+            });
+
+            await sendLog(message.client, `📜 <@${discordId}> revisó la lista de bloqueos permitidos.`);
+            return message.reply(replyText);
+        }
+
+        // --- MANEJO DE COMANDOS QUE REQUIEREN UN USUARIO (BLOCK, UNBLOCK, ADDBL, RBL) ---
         if (!targetInput) {
             await sendLog(message.client, `<@${discordId}> intentó usar el comando \`${cmdName}\` pero no proporcionó ningún usuario.`);
             return message.reply("🤍 ¡Holi! Necesitas darme un ID de Roblox, un nombre de usuario o un enlace de perfil, por fis. 🩵☁️");
         }
 
-        const isAdmin = message.member.roles.cache.has(ADMIN_ROLE);
-        const isFriend = message.member.roles.cache.has(FRIEND_ROLE);
-
-        if (!isAdmin && !isFriend) {
-            await sendLog(message.client, `🚨 <@${discordId}> intentó usar \`${cmdName} ${targetInput}\` pero **NO tiene permisos**.`);
-            return message.reply("🤍 ¡Ups! No tienes los permisos para usar este comandito... 🥺🩵");
-        }
-
-        // --- RESOLVE THE INPUT TO A ROBLOX ID ---
+        // RESOLVE THE INPUT TO A ROBLOX ID
         let targetId = null;
 
         const linkMatch = targetInput.match(/(?:roblox\.com\/users\/)(\d+)/i);
@@ -107,20 +164,7 @@ module.exports = {
             }
         }
 
-        const now = Date.now();
-
-        // 1. Check User Cooldown (5 seconds)
-        if (global.userCooldowns.has(discordId)) {
-            const expiration = global.userCooldowns.get(discordId) + 5000;
-            if (now < expiration) {
-                const timeLeft = ((expiration - now) / 1000).toFixed(1);
-                await sendLog(message.client, `⏱️ <@${discordId}> golpeó su cooldown personal de 5s al intentar usar \`${cmdName}\`.`);
-                return message.reply(`🩵 ¡Ve más despacio, angelito! Espera \`${timeLeft}\`s antes de enviar otro comandito. 🤍`);
-            }
-        }
-        global.userCooldowns.set(discordId, now);
-
-        // 2. Handle Admin-only list editing (addbl / rbl)
+        // Handle Admin-only list editing (addbl / rbl)
         if (['addbl', 'rbl'].includes(cmdName)) {
             if (!isAdmin) {
                 await sendLog(message.client, `⚠️ <@${discordId}> intentó editar la lista usando \`${cmdName}\`, pero no es administrador.`);
@@ -141,7 +185,7 @@ module.exports = {
             }
         }
 
-        // 3. Handle block / unblock logic
+        // Handle block / unblock logic
         const action = ['block', 'bl'].includes(cmdName) ? 'block' : 'unblock';
         const actionEs = action === 'block' ? 'bloquear' : 'desbloquear';
         const actionEsPast = action === 'block' ? 'bloqueado' : 'desbloqueado';
@@ -166,7 +210,7 @@ module.exports = {
             }
         }
 
-        // 4. Execute the Roblox API request
+        // Execute the Roblox API request
         const cookie = process.env.ROBLOX_COOKIE;
         if (!cookie) {
             await sendLog(message.client, `❌ Error del sistema: Faltan las cookies de Roblox para <@${discordId}>.`);
