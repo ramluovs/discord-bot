@@ -73,77 +73,92 @@ async function getUsersInfo(userIds) {
     }
 }
 
+const puppeteer = require('puppeteer');
+
 async function robloxAction(userId, action, cookie) {
     const actionSuffix = action === 'block' ? 'block-user' : 'unblock-user';
-    const url = `https://apis.roblox.com/user-blocking-api/v1/users/${userId}/${actionSuffix}`;
+    const targetUrl = `https://apis.roblox.com/user-blocking-api/v1/users/${userId}/${actionSuffix}`;
 
-    let browserTrackerId = '77777777777'; // Fallback por si falla la recolección
-    
+    let browser;
     try {
-        console.log(`\n[ROBLOX] Simulando visita para obtener el BrowserTrackerID dinámico...`);
+        console.log(`\n[ROBLOX] Lanzando navegador invisible (Puppeteer)...`);
         
-        // 1. Visitamos Roblox para obligar al servidor a darnos un tracker ID fresco
-        const initReq = await fetch('https://www.roblox.com/', {
-            headers: { 
-                'Cookie': `.ROBLOSECURITY=${cookie}`,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+        // 1. Abrimos Chromium optimizado para Alpine Linux dentro de Termux
+        browser = await puppeteer.launch({
+            executablePath: '/usr/bin/chromium-browser',
+            headless: true,
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage',
+                '--disable-gpu'
+            ]
         });
-        
-        // 2. Extraemos las cookies de los headers (compatible con distintas versiones de Node)
-        let setCookieStr = '';
-        if (initReq.headers.getSetCookie) {
-            setCookieStr = initReq.headers.getSetCookie().join('; ');
-        } else {
-            setCookieStr = initReq.headers.get('set-cookie') || '';
-        }
-        
-        const match = setCookieStr.match(/browserTrackerId=([0-9]+)/i);
-        if (match) {
-            browserTrackerId = match[1];
-            console.log(`[ROBLOX] ✅ Tracker ID capturado con éxito: ${browserTrackerId}`);
-        } else {
-            console.log(`[ROBLOX] ⚠️ No se detectó un Tracker ID nuevo, intentando con ID por defecto.`);
-        }
 
-        // 3. Construimos los headers reales combinando la cookie y el nuevo tracker
-        const headers = { 
-            'Cookie': `.ROBLOSECURITY=${cookie}; browserTrackerId=${browserTrackerId};`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Origin': 'https://www.roblox.com',
-            'Referer': 'https://www.roblox.com/'
-        };
+        const page = await browser.newPage();
+        
+        // Simulamos un agente de usuario de PC real
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        console.log(`[ROBLOX] Obteniendo Token de Seguridad CSRF...`);
+        // 2. Inyectamos tu cookie de sesión de Roblox directamente en el navegador
+        await page.setCookie({
+            name: '.ROBLOSECURITY',
+            value: cookie,
+            domain: '.roblox.com',
+            path: '/',
+            httpOnly: true,
+            secure: true
+        });
+
+        console.log(`[ROBLOX] Visitando Roblox para generar contexto y el BrowserTrackerID...`);
         
-        // 4. Pedimos el CSRF
-        let csrfReq = await fetch('https://auth.roblox.com/v2/logout', { method: 'POST', headers });
-        let csrf = csrfReq.headers.get('x-csrf-token');
+        // 3. Entramos a Roblox para que el servidor reconozca la sesión y cree las cookies de rastreo reales
+        await page.goto('https://www.roblox.com/home', { waitUntil: 'networkidle2', timeout: 30000 });
+
+        console.log(`[ROBLOX] Ejecutando petición de '${action}' desde el navegador interno...`);
         
-        if (csrf) {
-            headers['X-CSRF-TOKEN'] = csrf;
-            console.log(`[ROBLOX] Token CSRF obtenido. Ejecutando '${action}'...`);
-            
-            // 5. Disparamos la acción final
-            let res = await fetch(url, { method: 'POST', headers, body: "{}" });
-            
-            if (res.ok) {
-                console.log(`[ROBLOX] ¡El usuario ${userId} fue procesado con éxito!`);
-                return true;
+        // 4. Ejecutamos el fetch dentro de la página para aprovechar el contexto completo de seguridad
+        const result = await page.evaluate(async (apiUrl) => {
+            // Obtenemos el token CSRF actualizado
+            const csrfRes = await fetch('https://auth.roblox.com/v2/logout', { method: 'POST' });
+            const csrfToken = csrfRes.headers.get('x-csrf-token');
+
+            if (!csrfToken) {
+                return { success: false, status: 0, text: 'No se pudo obtener el token CSRF' };
             }
-    
-            const text = await res.text();
-            console.log(`[ROBLOX] Error ${res.status} en la petición final: ${text}`);
+
+            // Disparamos la acción de bloqueo/desbloqueo
+            const res = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken
+                },
+                body: '{}'
+            });
+
+            return { 
+                success: res.ok, 
+                status: res.status, 
+                text: await res.text() 
+            };
+        }, targetUrl);
+
+        await browser.close();
+
+        if (result.success) {
+            console.log(`[ROBLOX] ¡Acción '${action}' ejecutada con éxito absoluto!`);
+            return true;
         } else {
-            console.log(`[ROBLOX] Error: El servidor no nos dio el Token CSRF.`);
+            console.log(`[ROBLOX] Roblox rechazó la petición (Status ${result.status}): ${result.text}`);
+            return false;
         }
-        
+
     } catch (e) {
-        console.error(`[ROBLOX] Error fatal en la conexión:`, e);
+        console.error(`[ROBLOX] Error crítico con Puppeteer:`, e);
+        if (browser) await browser.close();
+        return false;
     }
-    
-    return false;
 }
 
 module.exports = {
