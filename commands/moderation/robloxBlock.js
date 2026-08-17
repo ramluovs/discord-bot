@@ -75,8 +75,6 @@ async function getUsersInfo(userIds) {
 
 const puppeteer = require('puppeteer');
 
-const puppeteer = require('puppeteer');
-
 async function robloxAction(userId, action, cookie) {
     const actionSuffix = action === 'block' ? 'block-user' : 'unblock-user';
     const targetUrl = `https://apis.roblox.com/user-blocking-api/v1/users/${userId}/${actionSuffix}`;
@@ -100,7 +98,6 @@ async function robloxAction(userId, action, cookie) {
         
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // 1. Inyectamos tu cookie de sesión de Roblox
         await page.setCookie({
             name: '.ROBLOSECURITY',
             value: cookie,
@@ -113,11 +110,9 @@ async function robloxAction(userId, action, cookie) {
         console.log(`[ROBLOX] Visitando Roblox para generar el contexto de seguridad...`);
         await page.goto('https://www.roblox.com/home', { waitUntil: 'networkidle2', timeout: 30000 });
 
-        // 2. Damos un respiro de 3 segundos para que los scripts de Roblox creen el BrowserTrackerID
         console.log(`[ROBLOX] Esperando generación de huella digital (Tracker ID)...`);
         await new Promise(resolve => setTimeout(resolve, 3000));
 
-        // 3. Extraemos las cookies reales que generó el navegador (incluyendo el tracker id)
         const cookies = await page.cookies();
         const trackerCookie = cookies.find(c => c.name === 'rbx_browser_tracker_id');
         const browserTrackerId = trackerCookie ? trackerCookie.value : '';
@@ -130,9 +125,7 @@ async function robloxAction(userId, action, cookie) {
 
         console.log(`[ROBLOX] Ejecutando petición de '${action}' con contexto real...`);
         
-        // 4. Ejecutamos la petición pasando el Tracker ID tanto en cookies como en cabeceras
         const result = await page.evaluate(async (apiUrl, trackerId) => {
-            // Obtenemos el token CSRF actualizado
             const csrfRes = await fetch('https://auth.roblox.com/v2/logout', { method: 'POST' });
             const csrfToken = csrfRes.headers.get('x-csrf-token');
 
@@ -145,7 +138,6 @@ async function robloxAction(userId, action, cookie) {
                 'X-CSRF-TOKEN': csrfToken
             };
 
-            // Si tenemos el ID del navegador, lo añadimos explícitamente a la cabecera que Roblox exige
             if (trackerId) {
                 headers['BrowserTrackerId'] = trackerId;
             }
@@ -328,4 +320,4 @@ module.exports = {
             return message.reply(createEmbed("Error", `Hubo un error al procesar la solicitud. Verifica la cookie en Termux. 🩵`));
         }
     }
-};
+};[cite: 1]
