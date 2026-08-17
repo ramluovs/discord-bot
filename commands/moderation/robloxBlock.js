@@ -74,7 +74,16 @@ async function getUsersInfo(userIds) {
 }
 
 async function robloxAction(userId, action, cookie) {
-    const url = `https://accountsettings.roblox.com/v1/users/${userId}/${action}`;
+    // Definimos el sufijo para la nueva arquitectura de la API de Roblox
+    const actionSuffix = action === 'block' ? 'block-user' : 'unblock-user';
+    
+    // Lista de rutas modernas a intentar, comenzando por las más recientes
+    const urlsToTry = [
+        `https://apis.roblox.com/user-blocking/v1/users/${userId}/${action}`,
+        `https://apis.roblox.com/user-blocking/v1/users/${userId}/${actionSuffix}`,
+        `https://accountsettings.roblox.com/v1/users/${userId}/${action}`
+    ];
+
     const headers = { 
         'Cookie': `.ROBLOSECURITY=${cookie}`,
         'Content-Type': 'application/json',
@@ -82,33 +91,51 @@ async function robloxAction(userId, action, cookie) {
         'Origin': 'https://www.roblox.com',
         'Referer': 'https://www.roblox.com/'
     };
-    
-    try {
-        console.log(`\n[ROBLOX] Intentando ${action} al usuario ${userId}...`);
-        // Añadimos un body vacío, Roblox a veces da error si mandas un POST sin cuerpo
-        let res = await fetch(url, { method: 'POST', headers, body: "{}" }); 
-        
-        if (res.status === 403) {
-            const csrf = res.headers.get('x-csrf-token');
-            console.log(`[ROBLOX] Petición de seguridad 403. CSRF Token recibido: ${csrf ? 'Sí' : 'No'}`);
-            if (csrf) {
-                headers['X-CSRF-TOKEN'] = csrf;
-                res = await fetch(url, { method: 'POST', headers, body: "{}" });
+
+    // Cuerpo con datos adicionales en caso de que la nueva API lo requiera
+    const payload = JSON.stringify({ blockeeId: parseInt(userId), userId: parseInt(userId) });
+    let lastCsrf = null;
+
+    for (const url of urlsToTry) {
+        try {
+            console.log(`\n[ROBLOX] Probando ruta: ${url}`);
+            if (lastCsrf) headers['X-CSRF-TOKEN'] = lastCsrf;
+            
+            let res = await fetch(url, { method: 'POST', headers, body: payload });
+            
+            if (res.status === 403) {
+                const csrf = res.headers.get('x-csrf-token');
+                if (csrf) {
+                    lastCsrf = csrf;
+                    headers['X-CSRF-TOKEN'] = csrf;
+                    console.log(`[ROBLOX] CSRF Token obtenido. Reintentando la solicitud...`);
+                    res = await fetch(url, { method: 'POST', headers, body: payload });
+                }
             }
+
+            console.log(`[ROBLOX] Respuesta de la ruta: Código ${res.status}`);
+            
+            if (res.ok) {
+                console.log(`[ROBLOX] Operación completada exitosamente en esta ruta.`);
+                return true;
+            }
+
+            if (res.status === 400) {
+                const text = await res.text();
+                console.log(`[ROBLOX] Error 400. Posiblemente el usuario ya posee este estado: ${text}`);
+                return false; 
+            }
+
+            if (res.status === 404) {
+                console.log(`[ROBLOX] Ruta inactiva (404), intentando la siguiente alternativa...`);
+            }
+
+        } catch (e) {
+            console.error(`[ROBLOX] Error de conexión en ${url}:`, e);
         }
-        
-        console.log(`[ROBLOX] Respuesta final: Código ${res.status}`);
-        
-        if (!res.ok) {
-            const text = await res.text();
-            console.log(`[ROBLOX] MOTIVO DEL ERROR: ${text}\n`);
-        }
-        
-        return res.ok;
-    } catch (e) {
-        console.error("[ROBLOX] Error de conexión:", e);
-        return false;
     }
+    
+    return false;
 }
 
 module.exports = {
