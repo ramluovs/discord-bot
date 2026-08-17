@@ -74,40 +74,41 @@ async function getUsersInfo(userIds) {
 }
 
 async function robloxAction(userId, action, cookie) {
-    // La nueva API requiere los sufijos exactos
     const actionSuffix = action === 'block' ? 'block-user' : 'unblock-user';
-    
-    // Ruta web correcta de la API actual
     const url = `https://apis.roblox.com/user-blocking-api/v1/users/${userId}/${actionSuffix}`;
 
+    // EL TRUCO: Añadimos un tracker ID falso para engañar al sistema de seguridad
     const headers = { 
-        'Cookie': `.ROBLOSECURITY=${cookie}`,
+        'Cookie': `.ROBLOSECURITY=${cookie}; browserTrackerId=77777777777;`,
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Origin': 'https://www.roblox.com',
         'Referer': 'https://www.roblox.com/'
     };
 
     try {
-        console.log(`\n[ROBLOX] Ejecutando '${action}' en: ${url}`);
+        console.log(`\n[ROBLOX] Obteniendo Token de Seguridad CSRF...`);
         
-        let res = await fetch(url, { method: 'POST', headers, body: "{}" });
+        // Hacemos un ping al endpoint de logout (que es seguro) solo para que nos regale el CSRF Token
+        let csrfReq = await fetch('https://auth.roblox.com/v2/logout', { method: 'POST', headers });
+        let csrf = csrfReq.headers.get('x-csrf-token');
         
-        if (res.status === 403) {
-            const csrf = res.headers.get('x-csrf-token');
-            if (csrf) {
-                headers['X-CSRF-TOKEN'] = csrf;
-                res = await fetch(url, { method: 'POST', headers, body: "{}" });
+        if (csrf) {
+            headers['X-CSRF-TOKEN'] = csrf;
+            console.log(`[ROBLOX] Token obtenido. Ejecutando '${action}' en: ${url}`);
+            
+            let res = await fetch(url, { method: 'POST', headers, body: "{}" });
+            
+            if (res.ok) {
+                console.log(`[ROBLOX] ¡El usuario ${userId} fue procesado con éxito!`);
+                return true;
             }
+    
+            const text = await res.text();
+            console.log(`[ROBLOX] Error ${res.status}: ${text}`);
+        } else {
+            console.log(`[ROBLOX] Fallo al obtener el Token CSRF. Verifica la validez de la cookie.`);
         }
-        
-        if (res.ok) {
-            console.log(`[ROBLOX] ¡El usuario ${userId} fue procesado con éxito!`);
-            return true;
-        }
-
-        const text = await res.text();
-        console.log(`[ROBLOX] Error ${res.status}: ${text}`);
         
     } catch (e) {
         console.error(`[ROBLOX] Error en la petición:`, e);
