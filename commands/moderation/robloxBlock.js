@@ -74,65 +74,43 @@ async function getUsersInfo(userIds) {
 }
 
 async function robloxAction(userId, action, cookie) {
-    // Definimos el sufijo para la nueva arquitectura de la API de Roblox
+    // La nueva API requiere los sufijos exactos
     const actionSuffix = action === 'block' ? 'block-user' : 'unblock-user';
     
-    // Lista de rutas modernas a intentar, comenzando por las más recientes
-    const urlsToTry = [
-        `https://apis.roblox.com/user-blocking/v1/users/${userId}/${action}`,
-        `https://apis.roblox.com/user-blocking/v1/users/${userId}/${actionSuffix}`,
-        `https://accountsettings.roblox.com/v1/users/${userId}/${action}`
-    ];
+    // Ruta web correcta de la API actual
+    const url = `https://apis.roblox.com/user-blocking-api/v1/users/${userId}/${actionSuffix}`;
 
     const headers = { 
         'Cookie': `.ROBLOSECURITY=${cookie}`,
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Origin': 'https://www.roblox.com',
         'Referer': 'https://www.roblox.com/'
     };
 
-    // Cuerpo con datos adicionales en caso de que la nueva API lo requiera
-    const payload = JSON.stringify({ blockeeId: parseInt(userId), userId: parseInt(userId) });
-    let lastCsrf = null;
-
-    for (const url of urlsToTry) {
-        try {
-            console.log(`\n[ROBLOX] Probando ruta: ${url}`);
-            if (lastCsrf) headers['X-CSRF-TOKEN'] = lastCsrf;
-            
-            let res = await fetch(url, { method: 'POST', headers, body: payload });
-            
-            if (res.status === 403) {
-                const csrf = res.headers.get('x-csrf-token');
-                if (csrf) {
-                    lastCsrf = csrf;
-                    headers['X-CSRF-TOKEN'] = csrf;
-                    console.log(`[ROBLOX] CSRF Token obtenido. Reintentando la solicitud...`);
-                    res = await fetch(url, { method: 'POST', headers, body: payload });
-                }
+    try {
+        console.log(`\n[ROBLOX] Ejecutando '${action}' en: ${url}`);
+        
+        let res = await fetch(url, { method: 'POST', headers, body: "{}" });
+        
+        if (res.status === 403) {
+            const csrf = res.headers.get('x-csrf-token');
+            if (csrf) {
+                headers['X-CSRF-TOKEN'] = csrf;
+                res = await fetch(url, { method: 'POST', headers, body: "{}" });
             }
-
-            console.log(`[ROBLOX] Respuesta de la ruta: Código ${res.status}`);
-            
-            if (res.ok) {
-                console.log(`[ROBLOX] Operación completada exitosamente en esta ruta.`);
-                return true;
-            }
-
-            if (res.status === 400) {
-                const text = await res.text();
-                console.log(`[ROBLOX] Error 400. Posiblemente el usuario ya posee este estado: ${text}`);
-                return false; 
-            }
-
-            if (res.status === 404) {
-                console.log(`[ROBLOX] Ruta inactiva (404), intentando la siguiente alternativa...`);
-            }
-
-        } catch (e) {
-            console.error(`[ROBLOX] Error de conexión en ${url}:`, e);
         }
+        
+        if (res.ok) {
+            console.log(`[ROBLOX] ¡El usuario ${userId} fue procesado con éxito!`);
+            return true;
+        }
+
+        const text = await res.text();
+        console.log(`[ROBLOX] Error ${res.status}: ${text}`);
+        
+    } catch (e) {
+        console.error(`[ROBLOX] Error en la petición:`, e);
     }
     
     return false;
@@ -142,7 +120,6 @@ module.exports = {
     name: 'block',
     aliases: ['bl', 'unblock', 'ubl', 'addbl', 'rbl', 'blocklist', 'abl'],
     async execute(message, parsedCommand) {
-        // La información estructurada proviene de bot.js
         const cmdName = parsedCommand.commandName;
         const targetInput = parsedCommand.args[0];
         const discordId = message.author.id;
@@ -167,7 +144,6 @@ module.exports = {
         }
         global.userCooldowns.set(discordId, now);
 
-        // Comandos de lectura de lista
         if (['blocklist', 'abl'].includes(cmdName)) {
             let list = JSON.parse(fs.readFileSync(LIST_PATH));
             
@@ -192,7 +168,6 @@ module.exports = {
             return message.reply(createEmbed("Usuarios Permitidos", `${replyText}\n🩵`));
         }
 
-        // Comandos que requieren un objetivo
         if (!targetInput) {
             await sendLog(message.client, "Falta de Datos", `<@${discordId}> intentó usar \`${cmdName}\` sin proporcionar un objetivo.`);
             return message.reply(createEmbed("Faltan Datos", "Se requiere un ID de Roblox, nombre de usuario o enlace de perfil para usar este comando. 🩵"));
@@ -213,7 +188,6 @@ module.exports = {
             }
         }
 
-        // Comandos de administración de lista
         if (['addbl', 'rbl'].includes(cmdName)) {
             if (!isAdmin) {
                 await sendLog(message.client, "Intento de Modificación", `<@${discordId}> intentó modificar la lista mediante \`${cmdName}\` sin ser administrador.`);
@@ -235,14 +209,12 @@ module.exports = {
             }
         }
 
-        // Ejecución de bloqueo o desbloqueo
         const action = ['block', 'bl'].includes(cmdName) ? 'block' : 'unblock';
-        const actionEs = action === 'block' ? 'bloquear' : 'desbloquear';
-        const actionEsPast = action === 'block' ? 'bloqueado' : 'desbloqueado';
+        const actionEs = action === 'block' ? 'expulsar' : 'desbloquear';
 
         const targetKey = `${action}-${targetId}`;
         if (global.targetCooldowns.has(targetKey)) {
-            const expiration = global.targetCooldowns.get(targetKey) + 120000;
+            const expiration = global.targetCooldowns.get(targetKey) + 30000;
             if (now < expiration) {
                 const timeLeft = Math.ceil((expiration - now) / 1000);
                 await sendLog(message.client, "Cooldown de Usuario", `<@${discordId}> intentó ${actionEs} al ID \`${targetId}\` repetidamente.`);
@@ -268,11 +240,28 @@ module.exports = {
         
         if (success) {
             global.targetCooldowns.set(targetKey, now);
-            await sendLog(message.client, "Acción Exitosa", `<@${discordId}> ha **${actionEsPast}** al ID \`${targetId}\` exitosamente.`);
-            return message.reply(createEmbed("Acción Completada", `El usuario ha sido **${actionEsPast}** exitosamente. 🩵\n\n**Perfil:** [Enlace de Roblox](https://www.roblox.com/users/${targetId}/profile)\n**ID:** \`${targetId}\``));
+            
+            if (action === 'block') {
+                await sendLog(message.client, "Expulsión Exitosa", `<@${discordId}> ha **expulsado** (bloqueado) al ID \`${targetId}\` exitosamente.`);
+                await message.reply(createEmbed("Expulsión Completada", `El jugador ha sido **expulsado** del servidor privado exitosamente. 🩵\n\n**Perfil:** [Enlace de Roblox](https://www.roblox.com/users/${targetId}/profile)\n**ID:** \`${targetId}\`\n\n*Nota: El sistema lo desbloqueará en 5 segundos automáticamente.*`));
+                
+                // Sistema de Auto-Desbloqueo tras 5 segundos
+                setTimeout(async () => {
+                    const unblocked = await robloxAction(targetId, 'unblock', cookie);
+                    if (unblocked) {
+                        await sendLog(message.client, "Auto-Desbloqueo", `El sistema ha **desbloqueado** automáticamente al ID \`${targetId}\` para mantener la lista limpia.`);
+                    }
+                }, 5000);
+                
+                return;
+            } else {
+                await sendLog(message.client, "Desbloqueo Exitoso", `<@${discordId}> ha **desbloqueado** al ID \`${targetId}\` exitosamente.`);
+                return message.reply(createEmbed("Acción Completada", `El usuario ha sido **desbloqueado** exitosamente. 🩵\n\n**Perfil:** [Enlace de Roblox](https://www.roblox.com/users/${targetId}/profile)\n**ID:** \`${targetId}\``));
+            }
+            
         } else {
             await sendLog(message.client, "Fallo en Acción", `<@${discordId}> falló al intentar ${actionEs} al ID \`${targetId}\`.`);
-            return message.reply(createEmbed("Error", `Hubo un error al procesar la solicitud. Verifica la cookie o si el usuario ya estaba ${actionEsPast}. 🩵`));
+            return message.reply(createEmbed("Error", `Hubo un error al procesar la solicitud. Verifica la cookie en Termux. 🩵`));
         }
     }
 };
