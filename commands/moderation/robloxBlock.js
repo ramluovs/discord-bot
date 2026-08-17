@@ -77,26 +77,55 @@ async function robloxAction(userId, action, cookie) {
     const actionSuffix = action === 'block' ? 'block-user' : 'unblock-user';
     const url = `https://apis.roblox.com/user-blocking-api/v1/users/${userId}/${actionSuffix}`;
 
-    // EL TRUCO: Añadimos un tracker ID falso para engañar al sistema de seguridad
-    const headers = { 
-        'Cookie': `.ROBLOSECURITY=${cookie}; browserTrackerId=77777777777;`,
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Origin': 'https://www.roblox.com',
-        'Referer': 'https://www.roblox.com/'
-    };
-
+    let browserTrackerId = '77777777777'; // Fallback por si falla la recolección
+    
     try {
-        console.log(`\n[ROBLOX] Obteniendo Token de Seguridad CSRF...`);
+        console.log(`\n[ROBLOX] Simulando visita para obtener el BrowserTrackerID dinámico...`);
         
-        // Hacemos un ping al endpoint de logout (que es seguro) solo para que nos regale el CSRF Token
+        // 1. Visitamos Roblox para obligar al servidor a darnos un tracker ID fresco
+        const initReq = await fetch('https://www.roblox.com/', {
+            headers: { 
+                'Cookie': `.ROBLOSECURITY=${cookie}`,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+        
+        // 2. Extraemos las cookies de los headers (compatible con distintas versiones de Node)
+        let setCookieStr = '';
+        if (initReq.headers.getSetCookie) {
+            setCookieStr = initReq.headers.getSetCookie().join('; ');
+        } else {
+            setCookieStr = initReq.headers.get('set-cookie') || '';
+        }
+        
+        const match = setCookieStr.match(/browserTrackerId=([0-9]+)/i);
+        if (match) {
+            browserTrackerId = match[1];
+            console.log(`[ROBLOX] ✅ Tracker ID capturado con éxito: ${browserTrackerId}`);
+        } else {
+            console.log(`[ROBLOX] ⚠️ No se detectó un Tracker ID nuevo, intentando con ID por defecto.`);
+        }
+
+        // 3. Construimos los headers reales combinando la cookie y el nuevo tracker
+        const headers = { 
+            'Cookie': `.ROBLOSECURITY=${cookie}; browserTrackerId=${browserTrackerId};`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Origin': 'https://www.roblox.com',
+            'Referer': 'https://www.roblox.com/'
+        };
+
+        console.log(`[ROBLOX] Obteniendo Token de Seguridad CSRF...`);
+        
+        // 4. Pedimos el CSRF
         let csrfReq = await fetch('https://auth.roblox.com/v2/logout', { method: 'POST', headers });
         let csrf = csrfReq.headers.get('x-csrf-token');
         
         if (csrf) {
             headers['X-CSRF-TOKEN'] = csrf;
-            console.log(`[ROBLOX] Token obtenido. Ejecutando '${action}' en: ${url}`);
+            console.log(`[ROBLOX] Token CSRF obtenido. Ejecutando '${action}'...`);
             
+            // 5. Disparamos la acción final
             let res = await fetch(url, { method: 'POST', headers, body: "{}" });
             
             if (res.ok) {
@@ -105,13 +134,13 @@ async function robloxAction(userId, action, cookie) {
             }
     
             const text = await res.text();
-            console.log(`[ROBLOX] Error ${res.status}: ${text}`);
+            console.log(`[ROBLOX] Error ${res.status} en la petición final: ${text}`);
         } else {
-            console.log(`[ROBLOX] Fallo al obtener el Token CSRF. Verifica la validez de la cookie.`);
+            console.log(`[ROBLOX] Error: El servidor no nos dio el Token CSRF.`);
         }
         
     } catch (e) {
-        console.error(`[ROBLOX] Error en la petición:`, e);
+        console.error(`[ROBLOX] Error fatal en la conexión:`, e);
     }
     
     return false;
@@ -246,7 +275,6 @@ module.exports = {
                 await sendLog(message.client, "Expulsión Exitosa", `<@${discordId}> ha **expulsado** (bloqueado) al ID \`${targetId}\` exitosamente.`);
                 await message.reply(createEmbed("Expulsión Completada", `El jugador ha sido **expulsado** del servidor privado exitosamente. 🩵\n\n**Perfil:** [Enlace de Roblox](https://www.roblox.com/users/${targetId}/profile)\n**ID:** \`${targetId}\`\n\n*Nota: El sistema lo desbloqueará en 5 segundos automáticamente.*`));
                 
-                // Sistema de Auto-Desbloqueo tras 5 segundos
                 setTimeout(async () => {
                     const unblocked = await robloxAction(targetId, 'unblock', cookie);
                     if (unblocked) {
