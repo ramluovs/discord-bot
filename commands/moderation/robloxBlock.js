@@ -320,4 +320,4 @@ module.exports = {
             return message.reply(createEmbed("Error", `Hubo un error al procesar la solicitud. Verifica la cookie en Termux. 🩵`));
         }
     }
-};[cite: 1]
+};
